@@ -115,6 +115,8 @@
   .btn-secondary { background: var(--card); color: var(--text); }
   .btn-danger { background: #7a1f2e; color: #f5a5b0; }
   .btn-gold { background: var(--gold); color: #1a1a2e; }
+  .btn-subtle { background: transparent; color: var(--muted); border: 1px solid rgba(255,255,255,.18); }
+  .btn-subtle:hover { background: rgba(255,255,255,.06); color: var(--text); opacity: 1; }
   .btn-sm { width: auto; padding: 6px 13px; font-size: 0.82rem; }
 
   .divider { color: var(--muted); text-align: center; font-size: 0.85rem; margin: 4px 0; }
@@ -127,7 +129,7 @@
   .room-header {
     display: flex;
     flex-wrap: wrap;
-    justify-content: center;
+    justify-content: space-between;
     align-items: center;
     gap: 16px;
     width: 100%;
@@ -171,21 +173,18 @@
       inset 0 2px 8px rgba(255,255,255,.07);
   }
 
-  .table-label {
+  /* Cheese token shown on the table while waiting to start */
+  .table-cheese {
     position: absolute;
     inset: 10%;
     display: flex;
     align-items: center;
     justify-content: center;
     pointer-events: none;
+    transition: opacity .5s ease, transform .5s ease;
   }
-  .table-label span {
-    color: rgba(255,255,255,.12);
-    font-size: 1rem;
-    letter-spacing: 3px;
-    text-transform: uppercase;
-    font-weight: 700;
-  }
+  .table-cheese svg { width: 38%; height: 38%; filter: drop-shadow(0 8px 16px rgba(0,0,0,.5)); }
+  .table-cheese.hidden { opacity: 0; transform: scale(.4); }
 
   /* Seat slots positioned around the table */
   .seat {
@@ -258,12 +257,17 @@
   .member-tag { font-size: 0.72rem; color: var(--gold); }
 
   .layout-row {
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
     gap: 24px;
-    justify-content: center;
-    align-items: flex-start;
+    align-items: start;
     width: 100%;
+  }
+  .layout-row .table-wrap { grid-column: 2; }
+  .layout-row .members-panel { grid-column: 3; justify-self: end; }
+  @media (max-width: 860px) {
+    .layout-row { grid-template-columns: 1fr; justify-items: center; }
+    .layout-row .table-wrap, .layout-row .members-panel { grid-column: 1; justify-self: center; }
   }
 
   /* Empty seat placeholder */
@@ -283,17 +287,30 @@
   .game-status { margin-top: 14px; font-size: 0.85rem; color: var(--muted); }
 
   .host-options {
+    width: 100%;
+    background: var(--surface);
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 10px;
+    padding: 14px 18px;
+    font-size: 0.9rem;
+  }
+  .settings-title {
+    font-size: 0.85rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: 700;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(255,255,255,.08);
+  }
+  .settings-controls {
     display: flex;
     flex-wrap: wrap;
     gap: 14px 24px;
     align-items: center;
-    justify-content: center;
-    background: var(--surface);
-    border: 1px solid rgba(255,255,255,.08);
-    border-radius: 10px;
-    padding: 12px 18px;
-    font-size: 0.9rem;
   }
+  .settings-controls .randomise-slot { margin-left: auto; }
   .host-options .opt { display: flex; align-items: center; gap: 8px; cursor: pointer; }
   .host-options .opt-hint { color: var(--muted); font-size: 0.82rem; }
   .host-options input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
@@ -458,6 +475,44 @@
   }
   .reveal-tag { font-size: 0.8rem; color: var(--gold); font-weight: 700; }
   .waiting-note { color: var(--muted); font-size: 0.9rem; margin-top: 14px; }
+
+  /* ── Voting dialog ── */
+  .overlay-card.wide { max-width: 820px; }
+  .vote-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 14px;
+    margin: 18px 0;
+  }
+  .vote-card {
+    background: var(--bg);
+    border: 2px solid rgba(255,255,255,.1);
+    border-radius: 12px;
+    padding: 14px 10px 12px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    transition: border-color .15s, transform .1s, background .15s;
+    text-align: center;
+  }
+  .vote-card:hover { border-color: var(--accent); background: var(--surface); }
+  .vote-card:active { transform: scale(.97); }
+  .vote-card.selected { border-color: var(--accent); background: rgba(233,69,96,.16); }
+  .vote-avatar { width: 64px; height: 64px; }
+  .vote-avatar svg { width: 100%; height: 100%; filter: drop-shadow(0 2px 6px rgba(0,0,0,.5)); }
+  .vote-cardname { font-weight: 800; font-size: 1rem; }
+  .vote-info { display: flex; flex-direction: column; gap: 3px; margin-top: 2px; }
+  .vote-tag {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--gold);
+    background: rgba(245,197,24,.12);
+    border-radius: 6px;
+    padding: 2px 6px;
+  }
+  .vote-tag.muted { color: var(--muted); background: rgba(255,255,255,.06); }
 </style>
 </head>
 <body>
@@ -506,28 +561,31 @@
       </div>
       <div class="room-actions">
         <button class="btn btn-primary btn-sm" id="startGameBtn" style="display:none">🧀 Start Game</button>
-        <button class="btn btn-gold btn-sm" id="randomiseBtn" style="display:none">🎲 Randomise Seats</button>
         <button class="btn btn-danger btn-sm" id="leaveBtn">🚪 Leave Room</button>
       </div>
     </div>
 
     <div id="hostOptions" class="host-options" style="display:none">
-      <label class="opt" id="fallMouseOpt"><input type="checkbox" id="optFallMouse"> 🐭 <b>Fall Mouse</b> <span class="opt-hint">— wins by getting the most votes (6-8 players)</span></label>
-      <label class="opt">⏱️ Discussion
-        <select id="optTimer">
-          <option value="90" selected>1.5 min</option>
-          <option value="120">2 min</option>
-          <option value="180">3 min</option>
-          <option value="240">4 min</option>
-          <option value="300">5 min</option>
-        </select>
-      </label>
+      <div class="settings-title">⚙️ Game Settings</div>
+      <div class="settings-controls">
+        <label class="opt" id="fallMouseOpt"><input type="checkbox" id="optFallMouse"> 🐭 <b>Fall Mouse</b> <span class="opt-hint">— wins by getting the most votes (6-8 players)</span></label>
+        <label class="opt">⏱️ Discussion
+          <select id="optTimer">
+            <option value="90" selected>1.5 min</option>
+            <option value="120">2 min</option>
+            <option value="180">3 min</option>
+            <option value="240">4 min</option>
+            <option value="300">5 min</option>
+          </select>
+        </label>
+        <span class="randomise-slot"><button class="btn btn-subtle btn-sm" id="randomiseBtn">🎲 Randomise Seats</button></span>
+      </div>
     </div>
 
     <div class="layout-row">
       <div class="table-wrap" id="tableWrap">
         <div class="table-circle"></div>
-        <div class="table-label"><span>Table</span></div>
+        <div class="table-cheese" id="tableCheese"></div>
         <!-- seats injected here -->
       </div>
 
@@ -675,7 +733,9 @@ function updateRoomControls() {
   startBtn.disabled = !canStart;
   startBtn.title = canStart ? '' : `Need ${minPlayers}-${maxPlayers} players`;
   document.getElementById('randomiseBtn').style.display = (isAdmin && inLobby) ? 'inline-flex' : 'none';
-  document.getElementById('hostOptions').style.display = (isAdmin && inLobby) ? 'flex' : 'none';
+  document.getElementById('hostOptions').style.display = (isAdmin && inLobby) ? 'block' : 'none';
+  const cheese = document.getElementById('tableCheese');
+  if (cheese) cheese.classList.toggle('hidden', !inLobby);
   const fmBox = document.getElementById('optFallMouse');
   const fmAllowed = n >= 6;
   fmBox.disabled = !fmAllowed;
@@ -742,6 +802,25 @@ function mouseSVG(color, style) {
 }
 
 const COLORS = ['#5b8dd9','#d96b5b','#5bd9a0','#d9c45b','#a05bd9','#5bd9d9','#d95ba0','#8dd95b'];
+
+// ── Cheese token (shown on the table while waiting to start) ──
+function cheeseSVG() {
+  return `<svg viewBox="0 0 120 90" xmlns="http://www.w3.org/2000/svg">
+    <defs><linearGradient id="cg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffe07a"/><stop offset="1" stop-color="#f2b300"/>
+    </linearGradient></defs>
+    <path d="M10 74 L110 74 L110 30 Z" fill="url(#cg)" stroke="#c79600" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M10 74 L110 30 L110 38 L20 74 Z" fill="#ffedab" opacity=".55"/>
+    <circle cx="46" cy="64" r="6" fill="#dca200"/>
+    <circle cx="74" cy="62" r="5" fill="#dca200"/>
+    <circle cx="93" cy="56" r="4" fill="#dca200"/>
+    <circle cx="64" cy="51" r="3.5" fill="#dca200"/>
+  </svg>`;
+}
+(function () {
+  const el = document.getElementById('tableCheese');
+  if (el) el.innerHTML = cheeseSVG();
+})();
 
 // ── Table rendering ──
 function renderTable(members, adminId) {
@@ -849,6 +928,7 @@ window.addEventListener('resize', () => {
 let mySecret = null;
 let gameState = null;
 let timerInterval = null;
+let myVoteTarget = null;
 
 const overlay = document.getElementById('gameOverlay');
 const overlayCard = document.getElementById('overlayCard');
@@ -869,6 +949,7 @@ socket.on('your_secret', (s) => { mySecret = s; renderGame(); });
 
 socket.on('game_update', (g) => {
   gameState = g;
+  if (g.phase === 'lobby' || g.phase === 'roleReveal') myVoteTarget = null;
   if (g.phase === 'lobby') {
     mySecret = null;
     overlay.classList.remove('show');
@@ -904,6 +985,8 @@ function renderGame() {
       <p class="waiting-note">Current phase: ${phase}</p>`;
     return;
   }
+
+  overlayCard.classList.toggle('wide', phase === 'voting');
 
   if (phase === 'roleReveal') renderRoleReveal();
   else if (phase === 'night') renderNight();
@@ -1056,26 +1139,52 @@ function startTimer() {
   timerInterval = setInterval(tick, 250);
 }
 
+// Anything the voter privately knows about a given candidate.
+function voteInfoTags(id) {
+  const s = mySecret || {};
+  const tags = [];
+  if (s.knownThiefId && s.knownThiefId === id) tags.push({ t: '🧀 You know: THIEF' });
+  if (s.peekResult && s.peekResult.targetId === id) tags.push({ t: `🔎 Woke at hour ${s.peekResult.hour}`, muted: true });
+  if (s.coFollowerIds && s.coFollowerIds.includes(id)) tags.push({ t: '🤝 Fellow follower' });
+  if (s.role === 'thief') {
+    if (s.awakeWith && s.awakeWith.includes(id)) tags.push({ t: '👀 Saw you', muted: true });
+    if (s.followersChosen && s.followersChosen.includes(id)) tags.push({ t: '🤝 Your follower' });
+  }
+  return tags;
+}
+
 function renderVoting() {
   if (timerInterval) clearInterval(timerInterval);
   const myVote = gameState.votedIds && gameState.votedIds.includes(myId);
   const voted = (gameState.votedIds || []).length;
   const total = gameState.total || roomMembers.length;
+  const candidates = roomMembers.filter(m => m.id !== myId && !isSpectator(m.id));
+
+  const cards = candidates.map(m => {
+    const color = COLORS[m.seat % COLORS.length];
+    const tags = voteInfoTags(m.id)
+      .map(tg => `<span class="vote-tag ${tg.muted ? 'muted' : ''}">${tg.t}</span>`).join('');
+    const sel = m.id === myVoteTarget ? ' selected' : '';
+    return `<button class="vote-card${sel}" data-vote="${m.id}">
+      <div class="vote-avatar">${mouseSVG(color, m.seat)}</div>
+      <div class="vote-cardname">${esc(m.name)}</div>
+      <div class="vote-info">${tags}</div>
+    </button>`;
+  }).join('');
+
   overlayCard.innerHTML = `
-    <h2>🗳️ Vote</h2>
-    <p class="sub">Point at the player you think stole the cheese.</p>
-    <div class="choice-grid">
-      ${roomMembers.filter(m => m.id !== myId).map(m =>
-        `<button class="choice-btn vote-btn" data-vote="${m.id}">${esc(m.name)}</button>`).join('')}
-    </div>
+    <h2>🗳️ Who stole the cheese?</h2>
+    <p class="sub">Tap a player to cast (or change) your vote.</p>
+    <div class="vote-grid">${cards}</div>
     <p class="waiting-note">${voted}/${total} votes cast${myVote ? ' — you voted ✓' : ''}</p>
     <div class="overlay-actions">${isAdmin ? hostBtn('Reveal Results →', 'end_voting') : ''}</div>
   `;
-  overlayCard.querySelectorAll('.vote-btn').forEach(b => {
+  overlayCard.querySelectorAll('.vote-card').forEach(b => {
     b.addEventListener('click', () => {
-      overlayCard.querySelectorAll('.vote-btn').forEach(x => x.classList.remove('selected'));
+      myVoteTarget = b.dataset.vote;
+      overlayCard.querySelectorAll('.vote-card').forEach(x => x.classList.remove('selected'));
       b.classList.add('selected');
-      socket.emit('cast_vote', { targetId: b.dataset.vote });
+      socket.emit('cast_vote', { targetId: myVoteTarget });
     });
   });
 }
