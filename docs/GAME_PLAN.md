@@ -233,7 +233,7 @@ Host drives forward transitions; server enforces preconditions and timers.
    follower scaling (witness mode ≤5; thief recruitment of 1/2 followers for 6/7/8 with
    per-count knowledge), tie-break rules, spectators for mid-round joiners, graceful
    disconnect/kick handling (drop non-essential players, abort only on losing the thief
-   or dropping below 4), host-configurable discussion timer (60/90/120/180s).
+   or dropping below 4), host-configurable discussion timer (1.5/2/3/4/5 min).
 
 Each milestone: commit with a clean message and push to
 `https://github.com/Frigan/CheeseThief` (per project workflow).

@@ -263,7 +263,7 @@ io.on('connection', (socket) => {
       socket.emit('error', `Need ${MIN_PLAYERS}-${MAX_PLAYERS} players to start.`);
       return;
     }
-    const discussionSeconds = [60, 90, 120, 180].includes(opts.discussionSeconds)
+    const discussionSeconds = [90, 120, 180, 240, 300].includes(opts.discussionSeconds)
       ? opts.discussionSeconds : 90;
     room.game = game.startGame(room.members, {
       fallMouse: !!opts.fallMouse,
