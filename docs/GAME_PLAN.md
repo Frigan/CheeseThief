@@ -165,7 +165,10 @@ die; final results reveal Thief + followers).
 Add screens layered over the existing table; reuse styling tokens/CSS vars.
 
 1. **Pre-game (in room):** host sees **Start Game** (enabled only at 4–8 players);
-   others see "waiting for host". Show player count requirement.
+   others see "waiting for host". Show player count requirement. Players sit around the
+   table as **mice** (4 silhouette styles, coloured by seat) with bold names; the admin
+   has a ⭐. A **Session Scores** panel ranks players by points won this session (+1 to
+   each winner per round), highlights the leader (👑), and offers the host a **Reset**.
 2. **Role reveal:** full-screen card flip — "🧀 You are the **Cheese Thief**" or
    "😴 You are a **Sleepyhead**". Tap to dismiss → `ack_role`.
 3. **Night phase:** animated hour counter 1→6 around the table; each player privately

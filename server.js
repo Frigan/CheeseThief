@@ -56,9 +56,30 @@ function broadcastRoom(code) {
     members: room.members,
     gamePhase: room.game ? room.game.phase : 'lobby',
     participantIds: gameActive(room) ? participantIds(room) : null,
+    scores: room.scores,
     minPlayers: MIN_PLAYERS,
     maxPlayers: MAX_PLAYERS,
   });
+}
+
+// Award 1 session point to every player on the winning side of a finished round.
+function awardPoints(room) {
+  const g = room.game;
+  if (!g || !g.result) return;
+  const r = g.result;
+  const parts = Object.keys(g.dice);
+  let winnerIds = [];
+  if (r.winners === 'fallMouse') {
+    if (r.fallMouseId) winnerIds = [r.fallMouseId];
+  } else if (r.winners === 'thief') {
+    // Thief and their followers — but never a Fall Mouse who was a follower.
+    winnerIds = [r.thiefId, ...r.followerIds.filter(f => f !== r.fallMouseId)];
+  } else {
+    // Sleepyheads: everyone who isn't the thief, a follower, or the Fall Mouse.
+    winnerIds = parts.filter(id =>
+      id !== r.thiefId && id !== r.fallMouseId && !r.followerIds.includes(id));
+  }
+  winnerIds.forEach(id => { room.scores[id] = (room.scores[id] || 0) + 1; });
 }
 
 // Public (non-secret) snapshot of the game, safe for everyone in the room.
@@ -111,8 +132,10 @@ function resolveAndReveal(code) {
   if (!room || !room.game) return;
   clearTimer(room);
   game.resolveVote(room.game, participantIds(room));
+  awardPoints(room);
   room.game.phase = 'results';
   broadcastGame(code);
+  broadcastRoom(code); // push updated session scores
 }
 
 // Remove a player from a room, handling host hand-off and in-progress rounds.
@@ -123,6 +146,7 @@ function departRoom(code, id) {
   const wasThief = wasParticipant && room.game.thiefId === id;
 
   room.members = room.members.filter(m => m.id !== id);
+  delete room.scores[id];
   if (room.members.length === 0) {
     clearTimer(room);
     delete rooms[code];
@@ -168,6 +192,7 @@ io.on('connection', (socket) => {
       members: [{ id: socket.id, name: String(name).slice(0, 20), seat: 0 }],
       game: null,
       discussionTimer: null,
+      scores: { [socket.id]: 0 },
     };
     currentRoom = code;
     socket.join(code);
@@ -188,6 +213,7 @@ io.on('connection', (socket) => {
     if (room.members.find(m => m.id === socket.id)) return;
     const joiningMidGame = gameActive(room);
     room.members.push({ id: socket.id, name: String(name).slice(0, 20), seat: room.members.length });
+    if (!(socket.id in room.scores)) room.scores[socket.id] = 0;
     currentRoom = code;
     socket.join(code);
     socket.emit('joined_room', { code, isAdmin: false });
@@ -334,6 +360,13 @@ io.on('connection', (socket) => {
     room.game = null;
     broadcastRoom(currentRoom);
     io.to(currentRoom).emit('game_update', { phase: 'lobby' });
+  });
+
+  socket.on('reset_scores', () => {
+    const room = rooms[currentRoom];
+    if (!room || !isHost()) return;
+    Object.keys(room.scores).forEach(id => { room.scores[id] = 0; });
+    broadcastRoom(currentRoom);
   });
 
   socket.on('disconnect', () => {

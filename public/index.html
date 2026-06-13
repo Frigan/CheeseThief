@@ -212,15 +212,16 @@
   }
 
   .seat-name {
-    font-size: 0.72rem;
-    font-weight: 600;
+    font-size: 0.92rem;
+    font-weight: 800;
     color: #fff;
-    text-shadow: 0 1px 4px rgba(0,0,0,.8);
+    text-shadow: 0 1px 4px rgba(0,0,0,.85);
     white-space: nowrap;
-    max-width: 80px;
+    max-width: 96px;
     overflow: hidden;
     text-overflow: ellipsis;
     text-align: center;
+    letter-spacing: .2px;
   }
 
   .seat-badge {
@@ -305,6 +306,33 @@
   }
 
   .seat.spectating { opacity: .4; filter: grayscale(.6); }
+
+  /* ── Scoreboard ── */
+  .scoreboard-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 22px;
+    border-top: 1px solid rgba(255,255,255,.08);
+    padding-top: 16px;
+  }
+  .scoreboard-head h3 { margin: 0; }
+  .score-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 10px;
+    border-radius: 8px;
+    background: var(--bg);
+    margin-bottom: 6px;
+    font-size: 0.92rem;
+  }
+  .score-row.leader { background: rgba(245,197,24,.14); border: 1px solid rgba(245,197,24,.4); }
+  .score-rank { width: 18px; text-align: center; color: var(--muted); font-size: 0.82rem; }
+  .score-dot { font-size: 1rem; }
+  .score-name { flex: 1; font-weight: 600; }
+  .score-pts { font-weight: 800; color: var(--gold); font-variant-numeric: tabular-nums; }
+  .score-empty { color: var(--muted); font-size: 0.85rem; }
 
   /* ── Game overlay ── */
   #gameOverlay {
@@ -506,6 +534,12 @@
         <h3>Players</h3>
         <div id="memberList"></div>
         <div id="gameStatus" class="game-status"></div>
+
+        <div class="scoreboard-head">
+          <h3>🏆 Session Scores</h3>
+          <button class="btn btn-danger btn-sm" id="resetScoresBtn" style="display:none">Reset</button>
+        </div>
+        <div id="scoreboard"></div>
       </div>
     </div>
   </div>
@@ -584,19 +618,47 @@ let roomMembers = [];
 let roomAdmin = null;
 let roomGamePhase = 'lobby';
 let participantIds = null;
+let roomScores = {};
 let minPlayers = 4, maxPlayers = 8;
 
-socket.on('room_update', ({ admin, members, gamePhase, participantIds: pid, minPlayers: mn, maxPlayers: mx }) => {
+socket.on('room_update', ({ admin, members, gamePhase, participantIds: pid, scores, minPlayers: mn, maxPlayers: mx }) => {
   isAdmin = admin === myId;
   roomMembers = members;
   roomAdmin = admin;
   roomGamePhase = gamePhase || 'lobby';
   participantIds = pid || null;
+  if (scores) roomScores = scores;
   if (mn) minPlayers = mn;
   if (mx) maxPlayers = mx;
   updateRoomControls();
   renderTable(members, admin);
   renderMemberList(members, admin);
+  renderScoreboard();
+});
+
+function renderScoreboard() {
+  const board = document.getElementById('scoreboard');
+  const ranked = [...roomMembers]
+    .map(m => ({ name: m.name, id: m.id, seat: m.seat, pts: roomScores[m.id] || 0 }))
+    .sort((a, b) => b.pts - a.pts || a.seat - b.seat);
+  const maxPts = ranked.length ? ranked[0].pts : 0;
+  board.innerHTML = ranked.map((p, i) => {
+    const isLeader = maxPts > 0 && p.pts === maxPts;
+    const color = COLORS[p.seat % COLORS.length];
+    return `<div class="score-row ${isLeader ? 'leader' : ''}">
+      <span class="score-rank">${isLeader ? '👑' : (i + 1)}</span>
+      <span class="score-dot" style="color:${color}">●</span>
+      <span class="score-name">${esc(p.name)}${p.id === myId ? ' (you)' : ''}</span>
+      <span class="score-pts">${p.pts}</span>
+    </div>`;
+  }).join('') || '<div class="score-empty">No scores yet.</div>';
+
+  document.getElementById('resetScoresBtn').style.display =
+    (isAdmin && roomGamePhase === 'lobby') ? 'inline-flex' : 'none';
+}
+
+document.getElementById('resetScoresBtn').addEventListener('click', () => {
+  if (confirm('Reset all session scores to zero?')) socket.emit('reset_scores');
 });
 
 function isSpectator(id) {
@@ -647,14 +709,34 @@ function showRoom() {
   document.getElementById('room').style.display = 'flex';
 }
 
-// ── Silhouette SVG ──
-function silhouetteSVG(color) {
-  return `<svg viewBox="0 0 52 52" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <!-- head -->
-    <circle cx="26" cy="14" r="9" fill="${color}"/>
-    <!-- body -->
-    <path d="M10 48 C10 34 42 34 42 48" fill="${color}"/>
-    <rect x="14" y="22" width="24" height="22" rx="6" fill="${color}"/>
+// ── Mouse silhouettes (4 styles, coloured by seat) ──
+function mouseSVG(color, style) {
+  style = ((style % 4) + 4) % 4;
+  // Per-style ear size/position, plus an optional accessory, for visual variety.
+  const ear = [
+    { r: 8.5, y: 14, x: 8 },   // 0: classic round ears
+    { r: 10.5, y: 12, x: 9 },  // 1: big ears
+    { r: 7, y: 15, x: 7 },     // 2: small ears
+    { r: 9, y: 13, x: 8.5 },   // 3: medium ears + hair tuft
+  ][style];
+  const tail = style === 2
+    ? `<path d="M39 42 q11 1 8 -10" stroke="${color}" stroke-width="2.6" fill="none" stroke-linecap="round"/>`
+    : '';
+  const tuft = style === 3
+    ? `<path d="M26 5 q2.5 -4 5 1" stroke="${color}" stroke-width="2.6" fill="none" stroke-linecap="round"/>`
+    : '';
+  const dark = 'rgba(0,0,0,.28)';
+  return `<svg viewBox="0 0 52 52" xmlns="http://www.w3.org/2000/svg">
+    ${tail}
+    <circle cx="${26 - ear.x}" cy="${ear.y}" r="${ear.r}" fill="${color}"/>
+    <circle cx="${26 + ear.x}" cy="${ear.y}" r="${ear.r}" fill="${color}"/>
+    <circle cx="${26 - ear.x}" cy="${ear.y}" r="${ear.r * 0.46}" fill="${dark}"/>
+    <circle cx="${26 + ear.x}" cy="${ear.y}" r="${ear.r * 0.46}" fill="${dark}"/>
+    ${tuft}
+    <ellipse cx="26" cy="31" rx="15" ry="16" fill="${color}"/>
+    <circle cx="20.5" cy="29" r="1.9" fill="${dark}"/>
+    <circle cx="31.5" cy="29" r="1.9" fill="${dark}"/>
+    <circle cx="26" cy="42.5" r="2.4" fill="${dark}"/>
   </svg>`;
 }
 
@@ -684,7 +766,7 @@ function renderTable(members, adminId) {
     const x = cx + seatR * Math.cos(angle);
     const y = cy + seatR * Math.sin(angle);
 
-    const color = COLORS[i % COLORS.length];
+    const color = COLORS[m.seat % COLORS.length];
     const isMe = m.id === myId;
     const isAdminMember = m.id === adminId;
 
@@ -696,7 +778,7 @@ function renderTable(members, adminId) {
 
     seat.innerHTML = `
       <div class="silhouette">
-        ${silhouetteSVG(color)}
+        ${mouseSVG(color, m.seat)}
         ${isAdminMember ? '<span class="seat-badge">⭐</span>' : ''}
       </div>
       <div class="seat-name">${esc(m.name)}${isMe ? ' (you)' : ''}</div>
