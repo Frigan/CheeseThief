@@ -278,6 +278,133 @@
 
   @keyframes fadeIn { from { opacity: 0; transform: translate(-50%,-50%) scale(.8); } to { opacity: 1; transform: translate(-50%,-50%) scale(1); } }
   .seat { animation: fadeIn .35s ease; }
+
+  .game-status { margin-top: 14px; font-size: 0.85rem; color: var(--muted); }
+
+  /* ── Game overlay ── */
+  #gameOverlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(10, 12, 24, 0.82);
+    backdrop-filter: blur(4px);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  #gameOverlay.show { display: flex; }
+
+  .overlay-card {
+    background: var(--surface);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 16px;
+    padding: 32px;
+    width: 100%;
+    max-width: 480px;
+    max-height: 90vh;
+    overflow-y: auto;
+    text-align: center;
+    box-shadow: 0 20px 60px rgba(0,0,0,.6);
+    animation: cardPop .3s ease;
+  }
+  @keyframes cardPop { from { opacity: 0; transform: scale(.9) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+
+  .overlay-card h2 { font-size: 1.5rem; margin-bottom: 8px; }
+  .overlay-card p { color: var(--text); margin-bottom: 12px; line-height: 1.5; }
+  .overlay-card .sub { color: var(--muted); font-size: 0.9rem; }
+
+  .role-badge {
+    font-size: 4rem;
+    margin: 12px 0;
+    display: block;
+  }
+  .role-title { font-size: 1.8rem; font-weight: 800; letter-spacing: 1px; margin-bottom: 6px; }
+  .role-thief { color: var(--accent); }
+  .role-sleepy { color: #5b8dd9; }
+
+  .info-line {
+    background: var(--bg);
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin: 10px 0;
+    text-align: left;
+    font-size: 0.95rem;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .info-line .emoji { font-size: 1.4rem; }
+
+  .hour-badge {
+    display: inline-block;
+    background: var(--card);
+    color: var(--gold);
+    font-size: 2.2rem;
+    font-weight: 800;
+    width: 64px;
+    height: 64px;
+    line-height: 64px;
+    border-radius: 50%;
+    border: 3px solid var(--gold);
+    margin: 8px 0;
+  }
+
+  .choice-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    margin: 14px 0;
+  }
+  .choice-btn {
+    background: var(--card);
+    color: var(--text);
+    border: 1px solid rgba(255,255,255,.15);
+    border-radius: 8px;
+    padding: 10px 16px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 600;
+    transition: background .15s, transform .1s;
+  }
+  .choice-btn:hover { background: var(--accent); }
+  .choice-btn:active { transform: scale(.96); }
+  .choice-btn.selected { background: var(--accent); color: #fff; }
+  .choice-btn:disabled { opacity: .5; cursor: default; }
+
+  .overlay-actions { margin-top: 18px; display: flex; flex-direction: column; gap: 10px; }
+
+  .timer-big {
+    font-size: 3rem;
+    font-weight: 800;
+    color: var(--gold);
+    margin: 10px 0;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .result-banner {
+    font-size: 1.6rem;
+    font-weight: 800;
+    padding: 14px;
+    border-radius: 12px;
+    margin-bottom: 16px;
+  }
+  .result-win { background: rgba(91,217,160,.18); color: #5bd9a0; }
+  .result-lose { background: rgba(233,69,96,.18); color: var(--accent); }
+
+  .reveal-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--bg);
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin: 6px 0;
+    font-size: 0.95rem;
+  }
+  .reveal-tag { font-size: 0.8rem; color: var(--gold); font-weight: 700; }
+  .waiting-note { color: var(--muted); font-size: 0.9rem; margin-top: 14px; }
 </style>
 </head>
 <body>
@@ -325,6 +452,7 @@
         <div class="code" id="displayCode">----</div>
       </div>
       <div class="room-actions">
+        <button class="btn btn-primary btn-sm" id="startGameBtn" style="display:none">🧀 Start Game</button>
         <button class="btn btn-gold btn-sm" id="randomiseBtn" style="display:none">🎲 Randomise Seats</button>
         <button class="btn btn-danger btn-sm" id="leaveBtn">🚪 Leave Room</button>
       </div>
@@ -340,10 +468,16 @@
       <div class="members-panel">
         <h3>Players</h3>
         <div id="memberList"></div>
+        <div id="gameStatus" class="game-status"></div>
       </div>
     </div>
   </div>
 </main>
+
+<!-- GAME OVERLAY -->
+<div id="gameOverlay">
+  <div class="overlay-card" id="overlayCard"></div>
+</div>
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
@@ -409,12 +543,42 @@ socket.on('error', (msg) => {
   lobbyError.textContent = msg;
 });
 
-socket.on('room_update', ({ admin, members }) => {
+let roomMembers = [];
+let roomAdmin = null;
+let roomGamePhase = 'lobby';
+let minPlayers = 4, maxPlayers = 8;
+
+socket.on('room_update', ({ admin, members, gamePhase, minPlayers: mn, maxPlayers: mx }) => {
   isAdmin = admin === myId;
-  document.getElementById('randomiseBtn').style.display = isAdmin ? 'inline-flex' : 'none';
+  roomMembers = members;
+  roomAdmin = admin;
+  roomGamePhase = gamePhase || 'lobby';
+  if (mn) minPlayers = mn;
+  if (mx) maxPlayers = mx;
+  updateRoomControls();
   renderTable(members, admin);
   renderMemberList(members, admin);
 });
+
+function updateRoomControls() {
+  const inLobby = roomGamePhase === 'lobby';
+  const n = roomMembers.length;
+  const canStart = isAdmin && inLobby && n >= minPlayers && n <= maxPlayers;
+  const startBtn = document.getElementById('startGameBtn');
+  startBtn.style.display = (isAdmin && inLobby) ? 'inline-flex' : 'none';
+  startBtn.disabled = !canStart;
+  startBtn.title = canStart ? '' : `Need ${minPlayers}-${maxPlayers} players`;
+  document.getElementById('randomiseBtn').style.display = (isAdmin && inLobby) ? 'inline-flex' : 'none';
+
+  const status = document.getElementById('gameStatus');
+  if (inLobby) {
+    status.textContent = n < minPlayers
+      ? `Need at least ${minPlayers} players to start (${n}/${minPlayers}).`
+      : `Ready to play — ${n} players.`;
+  } else {
+    status.textContent = '';
+  }
+}
 
 // ── Views ──
 function showLobby() {
@@ -545,6 +709,220 @@ window.addEventListener('resize', () => {
     renderTable(lastRoomState.members, lastRoomState.admin);
   }
 });
+
+// ══════════════ GAME ══════════════
+let mySecret = null;
+let gameState = null;
+let timerInterval = null;
+
+const overlay = document.getElementById('gameOverlay');
+const overlayCard = document.getElementById('overlayCard');
+
+function nameOf(id) {
+  const m = roomMembers.find(x => x.id === id);
+  return m ? esc(m.name) : '???';
+}
+
+document.getElementById('startGameBtn').addEventListener('click', () => {
+  socket.emit('start_game');
+});
+
+socket.on('your_secret', (s) => { mySecret = s; renderGame(); });
+
+socket.on('game_update', (g) => {
+  gameState = g;
+  if (g.phase === 'lobby') {
+    mySecret = null;
+    overlay.classList.remove('show');
+    return;
+  }
+  renderGame();
+});
+
+socket.on('game_aborted', ({ reason }) => {
+  mySecret = null;
+  gameState = null;
+  overlay.classList.remove('show');
+  if (reason) alert(reason);
+});
+
+function hostBtn(label, event) {
+  return isAdmin
+    ? `<button class="btn btn-primary" data-host="${event}">${label}</button>`
+    : `<p class="waiting-note">Waiting for the host…</p>`;
+}
+
+function renderGame() {
+  if (!gameState || gameState.phase === 'lobby') { overlay.classList.remove('show'); return; }
+  overlay.classList.add('show');
+  const phase = gameState.phase;
+
+  if (phase === 'roleReveal') renderRoleReveal();
+  else if (phase === 'night') renderNight();
+  else if (phase === 'discussion') renderDiscussion();
+  else if (phase === 'voting') renderVoting();
+  else if (phase === 'results') renderResults();
+
+  // Wire host buttons
+  overlayCard.querySelectorAll('[data-host]').forEach(b => {
+    b.addEventListener('click', () => socket.emit(b.dataset.host));
+  });
+  // Wire choice buttons
+  overlayCard.querySelectorAll('[data-action]').forEach(b => {
+    b.addEventListener('click', () => {
+      socket.emit(b.dataset.action, { targetId: b.dataset.target });
+    });
+  });
+}
+
+function renderRoleReveal() {
+  if (!mySecret) { overlayCard.innerHTML = '<p>Dealing cards…</p>'; return; }
+  const acked = (gameState.ackedCount || 0);
+  const total = gameState.total || roomMembers.length;
+  const isThief = mySecret.role === 'thief';
+  const iAcked = acked > 0 && mySecret._acked;
+  overlayCard.innerHTML = `
+    <span class="role-badge">${isThief ? '🧀' : '😴'}</span>
+    <div class="role-title ${isThief ? 'role-thief' : 'role-sleepy'}">
+      ${isThief ? 'CHEESE THIEF' : 'SLEEPYHEAD'}
+    </div>
+    <p class="sub">${isThief
+      ? 'Steal the cheese in the night and avoid the vote.'
+      : 'Work out who stole the breakfast cheese.'}</p>
+    <div class="overlay-actions">
+      <button class="btn btn-secondary" id="ackBtn">Got it 👍</button>
+      <p class="waiting-note">${acked}/${total} players ready</p>
+      ${isAdmin ? hostBtn('Begin Night →', 'begin_night') : ''}
+    </div>
+  `;
+  const ackBtn = document.getElementById('ackBtn');
+  if (ackBtn) ackBtn.addEventListener('click', () => {
+    socket.emit('ack_role');
+    ackBtn.disabled = true;
+    ackBtn.textContent = 'Ready ✓';
+  });
+}
+
+function cheeseText(c) {
+  if (c === 'thief') return { e: '🧀', t: 'You crept down and took the cheese.' };
+  if (c === true) return { e: '🧀', t: 'The cheese was still there when you woke.' };
+  if (c === 'taken') return { e: '👀', t: 'You woke just as the cheese was being taken!' };
+  return { e: '❌', t: 'The cheese was already gone when you woke.' };
+}
+
+function renderNight() {
+  if (!mySecret) { overlayCard.innerHTML = '<p>The house falls asleep…</p>'; return; }
+  const s = mySecret;
+  const ch = cheeseText(s.cheesePresent);
+  let html = `
+    <h2>🌙 Night</h2>
+    <p class="sub">You woke at hour</p>
+    <div class="hour-badge">${s.hour}</div>
+    <div class="info-line"><span class="emoji">${ch.e}</span><span>${ch.t}</span></div>
+  `;
+
+  if (s.isWitness && s.knownThiefId) {
+    html += `<div class="info-line"><span class="emoji">🔦</span><span>You saw <b>${nameOf(s.knownThiefId)}</b> take the cheese!${s.isFollower ? ' You are their <b>follower</b> — keep their secret.' : ''}</span></div>`;
+  }
+  if (s.role === 'thief') {
+    if (s.awakeWith.length === 0) {
+      html += `<div class="info-line"><span class="emoji">😎</span><span>Nobody saw you. The perfect crime — so far.</span></div>`;
+    } else if (s.needsFollowerChoice) {
+      html += `<div class="info-line"><span class="emoji">🤝</span><span>These players saw you. Choose one as your <b>follower</b>:</span></div>
+        <div class="choice-grid">
+          ${s.witnessCandidates.map(id => `<button class="choice-btn" data-action="choose_follower" data-target="${id}">${nameOf(id)}</button>`).join('')}
+        </div>`;
+    } else if (s.followerId) {
+      html += `<div class="info-line"><span class="emoji">🤝</span><span>Your follower is <b>${nameOf(s.followerId)}</b>.</span></div>`;
+    }
+  }
+
+  // Peek action for solo sleepyheads
+  if (s.canPeek) {
+    html += `<div class="info-line"><span class="emoji">🕵️</span><span>You were alone — peek at one player's wake-up hour:</span></div>
+      <div class="choice-grid">
+        ${roomMembers.filter(m => m.id !== myId).map(m => `<button class="choice-btn" data-action="peek_player" data-target="${m.id}">${esc(m.name)}</button>`).join('')}
+      </div>`;
+  } else if (s.peekResult) {
+    html += `<div class="info-line"><span class="emoji">🔎</span><span>You peeked: <b>${nameOf(s.peekResult.targetId)}</b> woke at hour <b>${s.peekResult.hour}</b>.</span></div>`;
+  }
+
+  html += `<div class="overlay-actions">${isAdmin ? hostBtn('Proceed to Discussion →', 'begin_discussion') : '<p class="waiting-note">Waiting for the host to wake everyone…</p>'}</div>`;
+  overlayCard.innerHTML = html;
+}
+
+function renderDiscussion() {
+  const s = mySecret || {};
+  const ch = s.cheesePresent !== undefined ? cheeseText(s.cheesePresent) : null;
+  overlayCard.innerHTML = `
+    <h2>☀️ Morning — Discuss!</h2>
+    <p class="sub">Argue your case. Who stole the cheese?</p>
+    <div class="timer-big" id="timerDisplay">--</div>
+    ${s.hour ? `<div class="info-line"><span class="emoji">⏰</span><span>You woke at hour <b>${s.hour}</b>.</span></div>` : ''}
+    ${ch ? `<div class="info-line"><span class="emoji">${ch.e}</span><span>${ch.t}</span></div>` : ''}
+    ${s.isWitness && s.knownThiefId ? `<div class="info-line"><span class="emoji">🔦</span><span>You know the thief is <b>${nameOf(s.knownThiefId)}</b>.</span></div>` : ''}
+    ${s.peekResult ? `<div class="info-line"><span class="emoji">🔎</span><span><b>${nameOf(s.peekResult.targetId)}</b> woke at hour <b>${s.peekResult.hour}</b>.</span></div>` : ''}
+    <div class="overlay-actions">${isAdmin ? hostBtn('Start Voting →', 'begin_voting') : '<p class="waiting-note">Voting begins when the timer ends.</p>'}</div>
+  `;
+  startTimer();
+}
+
+function startTimer() {
+  if (timerInterval) clearInterval(timerInterval);
+  const tick = () => {
+    const el = document.getElementById('timerDisplay');
+    if (!el || !gameState || !gameState.timerEndsAt) { return; }
+    const remaining = Math.max(0, Math.round((gameState.timerEndsAt - Date.now()) / 1000));
+    const m = String(Math.floor(remaining / 60)).padStart(1, '0');
+    const sec = String(remaining % 60).padStart(2, '0');
+    el.textContent = `${m}:${sec}`;
+    if (remaining <= 0) clearInterval(timerInterval);
+  };
+  tick();
+  timerInterval = setInterval(tick, 250);
+}
+
+function renderVoting() {
+  if (timerInterval) clearInterval(timerInterval);
+  const myVote = gameState.votedIds && gameState.votedIds.includes(myId);
+  const voted = (gameState.votedIds || []).length;
+  const total = gameState.total || roomMembers.length;
+  overlayCard.innerHTML = `
+    <h2>🗳️ Vote</h2>
+    <p class="sub">Point at the player you think stole the cheese.</p>
+    <div class="choice-grid">
+      ${roomMembers.filter(m => m.id !== myId).map(m =>
+        `<button class="choice-btn vote-btn" data-vote="${m.id}">${esc(m.name)}</button>`).join('')}
+    </div>
+    <p class="waiting-note">${voted}/${total} votes cast${myVote ? ' — you voted ✓' : ''}</p>
+    <div class="overlay-actions">${isAdmin ? hostBtn('Reveal Results →', 'end_voting') : ''}</div>
+  `;
+  overlayCard.querySelectorAll('.vote-btn').forEach(b => {
+    b.addEventListener('click', () => {
+      overlayCard.querySelectorAll('.vote-btn').forEach(x => x.classList.remove('selected'));
+      b.classList.add('selected');
+      socket.emit('cast_vote', { targetId: b.dataset.vote });
+    });
+  });
+}
+
+function renderResults() {
+  const r = gameState.result;
+  if (!r) { overlayCard.innerHTML = '<p>Tallying votes…</p>'; return; }
+  const iWon = (r.winners === 'sleepyheads' && mySecret && mySecret.role === 'sleepyhead' && !mySecret.isFollower)
+    || (r.winners === 'thief' && mySecret && (mySecret.role === 'thief' || mySecret.isFollower));
+  const sleepyWin = r.winners === 'sleepyheads';
+  overlayCard.innerHTML = `
+    <div class="result-banner ${iWon ? 'result-win' : 'result-lose'}">
+      ${sleepyWin ? '😴 Sleepyheads win!' : '🧀 The Cheese Thief escapes!'}
+    </div>
+    <p class="sub">${iWon ? 'You were on the winning side! 🎉' : 'Better luck next round.'}</p>
+    <div class="reveal-row"><span>🧀 <b>${nameOf(r.thiefId)}</b></span><span class="reveal-tag">THIEF</span></div>
+    ${r.followerId ? `<div class="reveal-row"><span>🤝 <b>${nameOf(r.followerId)}</b></span><span class="reveal-tag">FOLLOWER</span></div>` : ''}
+    <div class="info-line" style="margin-top:14px"><span class="emoji">🗳️</span><span>The group accused: <b>${(r.accused || []).map(nameOf).join(', ') || 'no one'}</b></span></div>
+    <div class="overlay-actions">${isAdmin ? hostBtn('🔄 Play Again', 'play_again') : '<p class="waiting-note">Waiting for the host to start a new round…</p>'}</div>
+  `;
+}
 </script>
 </body>
 </html>
