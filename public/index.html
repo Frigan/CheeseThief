@@ -183,7 +183,11 @@
     pointer-events: none;
     transition: opacity .5s ease, transform .5s ease;
   }
-  .table-cheese svg { width: 38%; height: 38%; filter: drop-shadow(0 8px 16px rgba(0,0,0,.5)); }
+  .table-cheese {
+    font-size: clamp(64px, 15vw, 130px);
+    line-height: 1;
+    filter: drop-shadow(0 10px 18px rgba(0,0,0,.55));
+  }
   .table-cheese.hidden { opacity: 0; transform: scale(.4); }
 
   /* Seat slots positioned around the table */
@@ -804,22 +808,9 @@ function mouseSVG(color, style) {
 const COLORS = ['#5b8dd9','#d96b5b','#5bd9a0','#d9c45b','#a05bd9','#5bd9d9','#d95ba0','#8dd95b'];
 
 // ── Cheese token (shown on the table while waiting to start) ──
-function cheeseSVG() {
-  return `<svg viewBox="0 0 120 90" xmlns="http://www.w3.org/2000/svg">
-    <defs><linearGradient id="cg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ffe07a"/><stop offset="1" stop-color="#f2b300"/>
-    </linearGradient></defs>
-    <path d="M10 74 L110 74 L110 30 Z" fill="url(#cg)" stroke="#c79600" stroke-width="3" stroke-linejoin="round"/>
-    <path d="M10 74 L110 30 L110 38 L20 74 Z" fill="#ffedab" opacity=".55"/>
-    <circle cx="46" cy="64" r="6" fill="#dca200"/>
-    <circle cx="74" cy="62" r="5" fill="#dca200"/>
-    <circle cx="93" cy="56" r="4" fill="#dca200"/>
-    <circle cx="64" cy="51" r="3.5" fill="#dca200"/>
-  </svg>`;
-}
 (function () {
   const el = document.getElementById('tableCheese');
-  if (el) el.innerHTML = cheeseSVG();
+  if (el) el.textContent = '🧀';
 })();
 
 // ── Table rendering ──
