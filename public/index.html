@@ -281,6 +281,31 @@
 
   .game-status { margin-top: 14px; font-size: 0.85rem; color: var(--muted); }
 
+  .host-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px 24px;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface);
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 10px;
+    padding: 12px 18px;
+    font-size: 0.9rem;
+  }
+  .host-options .opt { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+  .host-options .opt-hint { color: var(--muted); font-size: 0.82rem; }
+  .host-options input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
+  .host-options select {
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid rgba(255,255,255,.15);
+    border-radius: 6px;
+    padding: 4px 8px;
+  }
+
+  .seat.spectating { opacity: .4; filter: grayscale(.6); }
+
   /* ── Game overlay ── */
   #gameOverlay {
     display: none;
@@ -458,6 +483,18 @@
       </div>
     </div>
 
+    <div id="hostOptions" class="host-options" style="display:none">
+      <label class="opt"><input type="checkbox" id="optFallMouse"> 🐭 <b>Fall Mouse</b> <span class="opt-hint">— wins by getting the most votes</span></label>
+      <label class="opt">⏱️ Discussion
+        <select id="optTimer">
+          <option value="60">60s</option>
+          <option value="90" selected>90s</option>
+          <option value="120">120s</option>
+          <option value="180">180s</option>
+        </select>
+      </label>
+    </div>
+
     <div class="layout-row">
       <div class="table-wrap" id="tableWrap">
         <div class="table-circle"></div>
@@ -546,19 +583,25 @@ socket.on('error', (msg) => {
 let roomMembers = [];
 let roomAdmin = null;
 let roomGamePhase = 'lobby';
+let participantIds = null;
 let minPlayers = 4, maxPlayers = 8;
 
-socket.on('room_update', ({ admin, members, gamePhase, minPlayers: mn, maxPlayers: mx }) => {
+socket.on('room_update', ({ admin, members, gamePhase, participantIds: pid, minPlayers: mn, maxPlayers: mx }) => {
   isAdmin = admin === myId;
   roomMembers = members;
   roomAdmin = admin;
   roomGamePhase = gamePhase || 'lobby';
+  participantIds = pid || null;
   if (mn) minPlayers = mn;
   if (mx) maxPlayers = mx;
   updateRoomControls();
   renderTable(members, admin);
   renderMemberList(members, admin);
 });
+
+function isSpectator(id) {
+  return participantIds && !participantIds.includes(id);
+}
 
 function updateRoomControls() {
   const inLobby = roomGamePhase === 'lobby';
@@ -569,6 +612,7 @@ function updateRoomControls() {
   startBtn.disabled = !canStart;
   startBtn.title = canStart ? '' : `Need ${minPlayers}-${maxPlayers} players`;
   document.getElementById('randomiseBtn').style.display = (isAdmin && inLobby) ? 'inline-flex' : 'none';
+  document.getElementById('hostOptions').style.display = (isAdmin && inLobby) ? 'flex' : 'none';
 
   const status = document.getElementById('gameStatus');
   if (inLobby) {
@@ -576,7 +620,8 @@ function updateRoomControls() {
       ? `Need at least ${minPlayers} players to start (${n}/${minPlayers}).`
       : `Ready to play — ${n} players.`;
   } else {
-    status.textContent = '';
+    const specs = roomMembers.filter(m => isSpectator(m.id)).length;
+    status.textContent = specs ? `${specs} spectator${specs > 1 ? 's' : ''} waiting for next round.` : '';
   }
 }
 
@@ -638,7 +683,7 @@ function renderTable(members, adminId) {
     const isAdminMember = m.id === adminId;
 
     const seat = document.createElement('div');
-    seat.className = 'seat';
+    seat.className = 'seat' + (isSpectator(m.id) ? ' spectating' : '');
     seat.style.left = x + 'px';
     seat.style.top = y + 'px';
     seat.dataset.id = m.id;
@@ -674,6 +719,7 @@ function renderMemberList(members, adminId) {
       <span class="member-name">
         ${isAdminMember ? '⭐ ' : ''}${esc(m.name)}${isMe ? ' <span class="member-tag">(you)</span>' : ''}
       </span>
+      ${isSpectator(m.id) ? '<span class="member-tag">👀 spectating</span>' : ''}
       ${isAdmin && !isMe && !isAdminMember
         ? `<button class="btn btn-danger btn-sm kick-btn" data-id="${m.id}">Kick</button>`
         : isAdminMember ? '<span class="member-tag">Admin</span>' : ''}
@@ -724,7 +770,10 @@ function nameOf(id) {
 }
 
 document.getElementById('startGameBtn').addEventListener('click', () => {
-  socket.emit('start_game');
+  socket.emit('start_game', {
+    fallMouse: document.getElementById('optFallMouse').checked,
+    discussionSeconds: parseInt(document.getElementById('optTimer').value, 10),
+  });
 });
 
 socket.on('your_secret', (s) => { mySecret = s; renderGame(); });
@@ -757,6 +806,16 @@ function renderGame() {
   overlay.classList.add('show');
   const phase = gameState.phase;
 
+  // Spectators (joined mid-round) only watch until results.
+  if (mySecret && mySecret.spectator && phase !== 'results') {
+    overlayCard.innerHTML = `
+      <span class="role-badge">👀</span>
+      <h2>Spectating</h2>
+      <p class="sub">A round is already underway. You'll join in automatically next round.</p>
+      <p class="waiting-note">Current phase: ${phase}</p>`;
+    return;
+  }
+
   if (phase === 'roleReveal') renderRoleReveal();
   else if (phase === 'night') renderNight();
   else if (phase === 'discussion') renderDiscussion();
@@ -779,16 +838,16 @@ function renderRoleReveal() {
   if (!mySecret) { overlayCard.innerHTML = '<p>Dealing cards…</p>'; return; }
   const acked = (gameState.ackedCount || 0);
   const total = gameState.total || roomMembers.length;
-  const isThief = mySecret.role === 'thief';
-  const iAcked = acked > 0 && mySecret._acked;
+  const role = mySecret.role;
+  const meta = {
+    thief: { emoji: '🧀', cls: 'role-thief', title: 'CHEESE THIEF', sub: 'Steal the cheese in the night and avoid the vote.' },
+    fallMouse: { emoji: '🐭', cls: 'role-thief', title: 'FALL MOUSE', sub: 'Act suspicious! You win if you get the MOST votes.' },
+    sleepyhead: { emoji: '😴', cls: 'role-sleepy', title: 'SLEEPYHEAD', sub: 'Work out who stole the breakfast cheese.' },
+  }[role] || { emoji: '😴', cls: 'role-sleepy', title: 'SLEEPYHEAD', sub: '' };
   overlayCard.innerHTML = `
-    <span class="role-badge">${isThief ? '🧀' : '😴'}</span>
-    <div class="role-title ${isThief ? 'role-thief' : 'role-sleepy'}">
-      ${isThief ? 'CHEESE THIEF' : 'SLEEPYHEAD'}
-    </div>
-    <p class="sub">${isThief
-      ? 'Steal the cheese in the night and avoid the vote.'
-      : 'Work out who stole the breakfast cheese.'}</p>
+    <span class="role-badge">${meta.emoji}</span>
+    <div class="role-title ${meta.cls}">${meta.title}</div>
+    <p class="sub">${meta.sub}</p>
     <div class="overlay-actions">
       <button class="btn btn-secondary" id="ackBtn">Got it 👍</button>
       <p class="waiting-note">${acked}/${total} players ready</p>
@@ -862,6 +921,7 @@ function renderDiscussion() {
     ${ch ? `<div class="info-line"><span class="emoji">${ch.e}</span><span>${ch.t}</span></div>` : ''}
     ${s.isWitness && s.knownThiefId ? `<div class="info-line"><span class="emoji">🔦</span><span>You know the thief is <b>${nameOf(s.knownThiefId)}</b>.</span></div>` : ''}
     ${s.peekResult ? `<div class="info-line"><span class="emoji">🔎</span><span><b>${nameOf(s.peekResult.targetId)}</b> woke at hour <b>${s.peekResult.hour}</b>.</span></div>` : ''}
+    ${s.role === 'fallMouse' ? `<div class="info-line"><span class="emoji">🐭</span><span><b>Your goal:</b> get the most votes — look guilty!</span></div>` : ''}
     <div class="overlay-actions">${isAdmin ? hostBtn('Start Voting →', 'begin_voting') : '<p class="waiting-note">Voting begins when the timer ends.</p>'}</div>
   `;
   startTimer();
@@ -909,16 +969,24 @@ function renderVoting() {
 function renderResults() {
   const r = gameState.result;
   if (!r) { overlayCard.innerHTML = '<p>Tallying votes…</p>'; return; }
-  const iWon = (r.winners === 'sleepyheads' && mySecret && mySecret.role === 'sleepyhead' && !mySecret.isFollower)
-    || (r.winners === 'thief' && mySecret && (mySecret.role === 'thief' || mySecret.isFollower));
-  const sleepyWin = r.winners === 'sleepyheads';
+  const role = mySecret && mySecret.role;
+  let iWon = false;
+  if (r.winners === 'fallMouse') iWon = role === 'fallMouse';
+  else if (r.winners === 'sleepyheads') iWon = role === 'sleepyhead';
+  else iWon = role === 'thief' || (mySecret && mySecret.isFollower);
+
+  const banner = {
+    fallMouse: '🐭 The Fall Mouse fooled everyone!',
+    sleepyheads: '😴 Sleepyheads win!',
+    thief: '🧀 The Cheese Thief escapes!',
+  }[r.winners];
+
   overlayCard.innerHTML = `
-    <div class="result-banner ${iWon ? 'result-win' : 'result-lose'}">
-      ${sleepyWin ? '😴 Sleepyheads win!' : '🧀 The Cheese Thief escapes!'}
-    </div>
+    <div class="result-banner ${iWon ? 'result-win' : 'result-lose'}">${banner}</div>
     <p class="sub">${iWon ? 'You were on the winning side! 🎉' : 'Better luck next round.'}</p>
     <div class="reveal-row"><span>🧀 <b>${nameOf(r.thiefId)}</b></span><span class="reveal-tag">THIEF</span></div>
     ${r.followerId ? `<div class="reveal-row"><span>🤝 <b>${nameOf(r.followerId)}</b></span><span class="reveal-tag">FOLLOWER</span></div>` : ''}
+    ${r.fallMouseId ? `<div class="reveal-row"><span>🐭 <b>${nameOf(r.fallMouseId)}</b></span><span class="reveal-tag">FALL MOUSE</span></div>` : ''}
     <div class="info-line" style="margin-top:14px"><span class="emoji">🗳️</span><span>The group accused: <b>${(r.accused || []).map(nameOf).join(', ') || 'no one'}</b></span></div>
     <div class="overlay-actions">${isAdmin ? hostBtn('🔄 Play Again', 'play_again') : '<p class="waiting-note">Waiting for the host to start a new round…</p>'}</div>
   `;

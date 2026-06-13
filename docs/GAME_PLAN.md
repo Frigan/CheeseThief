@@ -43,9 +43,16 @@ players are awake together iff they rolled the **same hour**. We adopt this exac
   each player "the cheese was / was not there when you woke" — this is the one piece
   of hard information the game leaks.
 
+**Fall Mouse (optional role, implemented in M5):** a Tanner/Fool-style role the host
+can toggle on before the round. She replaces one Sleepyhead and plays exactly like
+one (rolls a die, can witness, can peek) but **wins by receiving the most votes**
+(sole plurality). Win priority at resolution: **Fall Mouse** (sole most-voted) >
+**Sleepyheads** (sole plurality on the thief) > **Thief**. The Fall Mouse can witness
+the theft but is never eligible to be the thief's follower.
+
 **Open variant to confirm later:** the printed rules add follower handling for 6+
-players ("after 6 o'clock"). Treat as a configurable variant; ship the core rule
-first (see §8).
+players ("after 6 o'clock"). The exact text isn't in public sources — **deferred**
+until the physical rulebook is on hand rather than guessed (see §8/§9).
 
 ---
 
@@ -198,8 +205,10 @@ Host drives forward transitions; server enforces preconditions and timers.
 3. **M3 — Client flow:** role reveal → night → discussion → voting → results screens.
 4. **M4 — Polish:** timers, animations (hour counter, finger-points, card flip),
    follower-pick & peek modals, play-again reset.
-5. **M5 — Variants & robustness:** 6+ follower variant, disconnect handling,
-   spectators, configurable timers/tie-break.
+5. **M5 — Variants & robustness:** ✅ Fall Mouse role (host toggle), spectators for
+   mid-round joiners, graceful disconnect/kick handling (drop non-essential players,
+   abort only on losing the thief or dropping below 4), host-configurable discussion
+   timer (60/90/120/180s). ⏸ 6+ follower variant deferred (needs rulebook text).
 
 Each milestone: commit with a clean message and push to
 `https://github.com/Frigan/CheeseThief` (per project workflow).

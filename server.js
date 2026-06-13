@@ -38,6 +38,15 @@ function gameActive(room) {
   return room.game && room.game.phase !== 'lobby';
 }
 
+// Players actually dealt into the current round (members without a die are spectators).
+function participantIds(room) {
+  return room.game ? Object.keys(room.game.dice) : [];
+}
+
+function isParticipant(room, id) {
+  return !!(room.game && room.game.dice[id] !== undefined);
+}
+
 function broadcastRoom(code) {
   const room = rooms[code];
   if (!room) return;
@@ -46,6 +55,7 @@ function broadcastRoom(code) {
     admin: room.admin,
     members: room.members,
     gamePhase: room.game ? room.game.phase : 'lobby',
+    participantIds: gameActive(room) ? participantIds(room) : null,
     minPlayers: MIN_PLAYERS,
     maxPlayers: MAX_PLAYERS,
   });
@@ -59,7 +69,7 @@ function broadcastGame(code) {
   io.to(code).emit('game_update', {
     phase: g.phase,
     ackedCount: g.acked.length,
-    total: room.members.length,
+    total: participantIds(room).length,
     votedIds: Object.keys(g.votes),
     timerEndsAt: g.timerEndsAt || null,
     result: g.phase === 'results' ? g.result : null,
@@ -67,11 +77,16 @@ function broadcastGame(code) {
 }
 
 // Send each member only the slice of game state they're allowed to see.
+// Members who joined mid-round have no die and receive a spectator marker.
 function sendSecrets(code) {
   const room = rooms[code];
   if (!room || !room.game) return;
   room.members.forEach(m => {
-    io.to(m.id).emit('your_secret', game.secretFor(room.game, m.id));
+    if (isParticipant(room, m.id)) {
+      io.to(m.id).emit('your_secret', game.secretFor(room.game, m.id));
+    } else {
+      io.to(m.id).emit('your_secret', { spectator: true });
+    }
   });
 }
 
@@ -88,6 +103,52 @@ function abortGame(code, reason) {
   clearTimer(room);
   room.game = null;
   io.to(code).emit('game_aborted', { reason });
+  broadcastRoom(code);
+}
+
+function resolveAndReveal(code) {
+  const room = rooms[code];
+  if (!room || !room.game) return;
+  clearTimer(room);
+  game.resolveVote(room.game, participantIds(room));
+  room.game.phase = 'results';
+  broadcastGame(code);
+}
+
+// Remove a player from a room, handling host hand-off and in-progress rounds.
+function departRoom(code, id) {
+  const room = rooms[code];
+  if (!room) return;
+  const wasParticipant = isParticipant(room, id);
+  const wasThief = wasParticipant && room.game.thiefId === id;
+
+  room.members = room.members.filter(m => m.id !== id);
+  if (room.members.length === 0) {
+    clearTimer(room);
+    delete rooms[code];
+    return;
+  }
+  if (room.admin === id) room.admin = room.members[0].id;
+  room.members.forEach((m, i) => { m.seat = i; });
+
+  if (wasParticipant) {
+    game.removeParticipant(room.game, id);
+    // Losing the thief or dropping below the minimum cancels the round.
+    if (wasThief || participantIds(room).length < MIN_PLAYERS) {
+      abortGame(code, 'Too few players remain — the round was cancelled.');
+      return;
+    }
+    broadcastRoom(code);
+    sendSecrets(code);
+    // A departure during voting can complete the tally.
+    if (room.game.phase === 'voting' &&
+        Object.keys(room.game.votes).length >= participantIds(room).length) {
+      resolveAndReveal(code);
+    } else {
+      broadcastGame(code);
+    }
+    return;
+  }
   broadcastRoom(code);
 }
 
@@ -120,25 +181,28 @@ io.on('connection', (socket) => {
       socket.emit('error', 'Room not found.');
       return;
     }
-    if (gameActive(room)) {
-      socket.emit('error', 'A game is in progress. Try again after this round.');
-      return;
-    }
     if (room.members.length >= MAX_PLAYERS) {
       socket.emit('error', `Room is full (max ${MAX_PLAYERS} players).`);
       return;
     }
     if (room.members.find(m => m.id === socket.id)) return;
+    const joiningMidGame = gameActive(room);
     room.members.push({ id: socket.id, name: String(name).slice(0, 20), seat: room.members.length });
     currentRoom = code;
     socket.join(code);
     socket.emit('joined_room', { code, isAdmin: false });
     broadcastRoom(code);
+    // A late joiner spectates the current round, then plays the next one.
+    if (joiningMidGame) {
+      io.to(socket.id).emit('your_secret', { spectator: true });
+      broadcastGame(code);
+    }
   });
 
   socket.on('leave_room', () => {
     if (!currentRoom || !rooms[currentRoom]) return;
-    removeFromRoom(socket.id, currentRoom);
+    socket.leave(currentRoom);
+    departRoom(currentRoom, socket.id);
     currentRoom = null;
   });
 
@@ -151,15 +215,7 @@ io.on('connection', (socket) => {
       target.emit('kicked');
       target.leave(currentRoom);
     }
-    if (gameActive(room) && room.game.dice[targetId] !== undefined) {
-      room.members = room.members.filter(m => m.id !== targetId);
-      reassignSeats(room);
-      abortGame(currentRoom, 'A player was removed — the round was cancelled.');
-      return;
-    }
-    room.members = room.members.filter(m => m.id !== targetId);
-    reassignSeats(room);
-    broadcastRoom(currentRoom);
+    departRoom(currentRoom, targetId);
   });
 
   socket.on('randomise_seats', () => {
@@ -174,14 +230,19 @@ io.on('connection', (socket) => {
 
   // ── Game actions ──────────────────────────────────────────────
 
-  socket.on('start_game', () => {
+  socket.on('start_game', (opts = {}) => {
     const room = rooms[currentRoom];
     if (!room || !isHost() || gameActive(room)) return;
     if (room.members.length < MIN_PLAYERS || room.members.length > MAX_PLAYERS) {
       socket.emit('error', `Need ${MIN_PLAYERS}-${MAX_PLAYERS} players to start.`);
       return;
     }
-    room.game = game.startGame(room.members);
+    const discussionSeconds = [60, 90, 120, 180].includes(opts.discussionSeconds)
+      ? opts.discussionSeconds : 90;
+    room.game = game.startGame(room.members, {
+      fallMouse: !!opts.fallMouse,
+      discussionSeconds,
+    });
     broadcastRoom(currentRoom);
     sendSecrets(currentRoom);
     broadcastGame(currentRoom);
@@ -250,8 +311,8 @@ io.on('connection', (socket) => {
     if (!room || !room.game || room.game.phase !== 'voting') return;
     if (game.castVote(room.game, socket.id, targetId)) {
       broadcastGame(currentRoom);
-      // Auto-resolve once everyone has voted.
-      if (Object.keys(room.game.votes).length >= room.members.length) {
+      // Auto-resolve once every participant has voted.
+      if (Object.keys(room.game.votes).length >= participantIds(room).length) {
         resolveAndReveal(currentRoom);
       }
     }
@@ -273,48 +334,8 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
-    if (currentRoom) removeFromRoom(socket.id, currentRoom);
+    if (currentRoom) departRoom(currentRoom, socket.id);
   });
-
-  // ── Helpers bound to this socket ──────────────────────────────
-
-  function resolveAndReveal(code) {
-    const room = rooms[code];
-    if (!room || !room.game) return;
-    clearTimer(room);
-    const ids = room.members.map(m => m.id);
-    game.resolveVote(room.game, ids);
-    room.game.phase = 'results';
-    broadcastGame(code);
-  }
-
-  function removeFromRoom(id, code) {
-    const room = rooms[code];
-    if (!room) return;
-    const wasInGame = gameActive(room) && room.game.dice[id] !== undefined;
-    room.members = room.members.filter(m => m.id !== id);
-    socket.leave(code);
-
-    if (room.members.length === 0) {
-      clearTimer(room);
-      delete rooms[code];
-      return;
-    }
-    if (room.admin === id) {
-      room.admin = room.members[0].id;
-    }
-    reassignSeats(room);
-
-    if (wasInGame) {
-      abortGame(code, 'A player left — the round was cancelled.');
-      return;
-    }
-    broadcastRoom(code);
-  }
-
-  function reassignSeats(room) {
-    room.members.forEach((m, i) => { m.seat = i; });
-  }
 });
 
 const PORT = process.env.PORT || 3000;

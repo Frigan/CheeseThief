@@ -12,27 +12,43 @@ function rollDie() {
 // Create a fresh game state for the given members ([{ id, name }]).
 function startGame(members, config = {}) {
   const ids = members.map(m => m.id);
+  const cfg = Object.assign(
+    { discussionSeconds: 90, tieEscapes: true, fallMouse: false },
+    config
+  );
+
   const thiefId = pick(ids);
+
+  // Optional Fall Mouse — a Tanner-style role that replaces one Sleepyhead and
+  // wins by drawing the most votes. Needs at least one non-thief seat to occupy.
+  let fallMouseId = null;
+  if (cfg.fallMouse && ids.length >= 3) {
+    const others = ids.filter(id => id !== thiefId);
+    fallMouseId = pick(others);
+  }
+
   const roles = {};
   const dice = {};
   ids.forEach(id => {
-    roles[id] = id === thiefId ? 'thief' : 'sleepyhead';
+    roles[id] = id === thiefId ? 'thief' : (id === fallMouseId ? 'fallMouse' : 'sleepyhead');
     dice[id] = rollDie();
   });
 
   const state = {
     phase: 'roleReveal',
     thiefId,
+    fallMouseId,
     roles,
     dice,
     followerId: null,
-    witnesses: [],
+    witnesses: [],         // everyone (incl. Fall Mouse) who saw the theft
+    followerCandidates: [], // witnesses eligible to be the thief's follower
     soloEligible: [],
-    peeks: {},          // { sleepyheadId: targetId }
-    cheesePresent: {},  // derived per player
-    votes: {},          // { voterId: targetId }
-    acked: [],          // ids that have seen their role
-    config: Object.assign({ discussionSeconds: 90, tieEscapes: true }, config),
+    peeks: {},
+    cheesePresent: {},
+    votes: {},
+    acked: [],
+    config: cfg,
     result: null,
   };
 
@@ -40,27 +56,26 @@ function startGame(members, config = {}) {
   return state;
 }
 
-// Derive witness / peek eligibility and per-player cheese visibility from the dice.
+// Derive witness / follower / peek eligibility and cheese visibility from the dice.
 function computeNight(state, ids) {
   const thiefHour = state.dice[state.thiefId];
 
   const counts = {};
   ids.forEach(id => { counts[state.dice[id]] = (counts[state.dice[id]] || 0) + 1; });
 
-  // Sleepyheads who rolled the thief's hour witness the theft (they know the thief).
+  // Anyone (Sleepyhead or Fall Mouse) awake at the thief's hour sees the theft.
   state.witnesses = ids.filter(id =>
-    id !== state.thiefId &&
-    state.roles[id] === 'sleepyhead' &&
-    state.dice[id] === thiefHour
+    id !== state.thiefId && state.dice[id] === thiefHour
   );
+  // The Fall Mouse has her own agenda, so she can never be the thief's follower.
+  state.followerCandidates = state.witnesses.filter(id => id !== state.fallMouseId);
 
-  // A sleepyhead alone at their hour may peek one other player's die.
+  // A player alone at their hour may peek one other player's die.
   state.soloEligible = ids.filter(id =>
     id !== state.thiefId && counts[state.dice[id]] === 1
   );
 
-  // The thief takes the cheese AT their hour: earlier wakers saw it, same-hour saw
-  // it taken, later wakers found it gone. This is the one genuine info signal.
+  // The thief takes the cheese AT their hour — the one genuine info signal.
   ids.forEach(id => {
     if (id === state.thiefId) {
       state.cheesePresent[id] = 'thief';
@@ -73,9 +88,9 @@ function computeNight(state, ids) {
     }
   });
 
-  // Exactly one witness → that player is automatically the follower.
-  if (state.witnesses.length === 1) {
-    state.followerId = state.witnesses[0];
+  // Exactly one eligible witness → automatically the follower.
+  if (state.followerCandidates.length === 1) {
+    state.followerId = state.followerCandidates[0];
   }
 }
 
@@ -85,10 +100,10 @@ function secretFor(state, id) {
   const isWitness = state.witnesses.includes(id);
   return {
     role: state.roles[id],
+    isFallMouse: id === state.fallMouseId,
     hour: state.dice[id],
     cheesePresent: state.cheesePresent[id],
     isWitness,
-    // The thief knows themselves; witnesses saw the thief take the cheese.
     knownThiefId: isThief || isWitness ? state.thiefId : null,
     awakeWith: isThief ? state.witnesses : [],
     canPeek: state.soloEligible.includes(id) && !isThief && !state.peeks[id],
@@ -97,12 +112,12 @@ function secretFor(state, id) {
       : null,
     isFollower: state.followerId === id,
     followerId: isThief ? state.followerId : null,
-    needsFollowerChoice: isThief && state.witnesses.length > 1 && !state.followerId,
-    witnessCandidates: isThief ? state.witnesses : [],
+    needsFollowerChoice: isThief && state.followerCandidates.length > 1 && !state.followerId,
+    witnessCandidates: isThief ? state.followerCandidates : [],
   };
 }
 
-// A solo sleepyhead spends their one peek on a target.
+// A solo player spends their one peek on a target.
 function applyPeek(state, peekerId, targetId) {
   if (!state.soloEligible.includes(peekerId)) return false;
   if (peekerId === state.thiefId) return false;
@@ -112,26 +127,43 @@ function applyPeek(state, peekerId, targetId) {
   return true;
 }
 
-// The thief picks their follower among witnesses.
+// The thief picks their follower among eligible witnesses.
 function chooseFollower(state, thiefId, targetId) {
   if (thiefId !== state.thiefId) return false;
-  if (!state.witnesses.includes(targetId)) return false;
+  if (!state.followerCandidates.includes(targetId)) return false;
   state.followerId = targetId;
   return true;
 }
 
 function castVote(state, voterId, targetId) {
   if (!(voterId in state.dice) || !(targetId in state.dice)) return false;
-  if (voterId === targetId) return false; // can't point at yourself
+  if (voterId === targetId) return false;
   state.votes[voterId] = targetId;
   return true;
 }
 
-// Tally votes; sleepyheads win only on a clear, single plurality landing on the thief.
+// Remove a participant who left mid-round without ending the round.
+function removeParticipant(state, id) {
+  delete state.dice[id];
+  delete state.roles[id];
+  delete state.votes[id];
+  delete state.peeks[id];
+  state.witnesses = state.witnesses.filter(x => x !== id);
+  state.followerCandidates = state.followerCandidates.filter(x => x !== id);
+  state.soloEligible = state.soloEligible.filter(x => x !== id);
+  state.acked = state.acked.filter(x => x !== id);
+  if (state.followerId === id) state.followerId = null;
+  if (state.fallMouseId === id) state.fallMouseId = null;
+  // Votes that pointed at the departed player are dropped too.
+  Object.keys(state.votes).forEach(v => { if (state.votes[v] === id) delete state.votes[v]; });
+}
+
+// Tally votes and resolve. Win priority: Fall Mouse (sole most-voted) > Sleepyheads
+// (sole plurality on the thief) > Thief.
 function resolveVote(state, ids) {
   const tally = {};
   ids.forEach(id => { tally[id] = 0; });
-  Object.values(state.votes).forEach(t => { tally[t] = (tally[t] || 0) + 1; });
+  Object.values(state.votes).forEach(t => { if (t in tally) tally[t] += 1; });
 
   let max = -1;
   let top = [];
@@ -141,8 +173,16 @@ function resolveVote(state, ids) {
     else if (c === max) { top.push(id); }
   });
 
-  const caught = max > 0 && top.length === 1 && top[0] === state.thiefId;
-  const winners = caught ? 'sleepyheads' : 'thief';
+  const soleTop = max > 0 && top.length === 1 ? top[0] : null;
+
+  let winners;
+  if (state.fallMouseId && soleTop === state.fallMouseId) {
+    winners = 'fallMouse';
+  } else if (soleTop === state.thiefId) {
+    winners = 'sleepyheads';
+  } else {
+    winners = 'thief';
+  }
 
   state.result = {
     winners,
@@ -150,6 +190,7 @@ function resolveVote(state, ids) {
     accused: top,
     thiefId: state.thiefId,
     followerId: state.followerId,
+    fallMouseId: state.fallMouseId,
   };
   return state.result;
 }
@@ -160,5 +201,6 @@ module.exports = {
   applyPeek,
   chooseFollower,
   castVote,
+  removeParticipant,
   resolveVote,
 };
