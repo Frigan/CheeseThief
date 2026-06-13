@@ -43,19 +43,35 @@ players are awake together iff they rolled the **same hour**. We adopt this exac
   each player "the cheese was / was not there when you woke" — this is the one piece
   of hard information the game leaks.
 
-**Fall Mouse (optional role, implemented in M5):** a Tanner/Fool-style role the host
-can toggle on before the round, **only in 6-8 player games**. She replaces one
-Sleepyhead card and plays exactly like a Sleepyhead (rolls a die, can witness, can
-peek, and *can* be chosen as the thief's follower) but **wins by receiving the most
-votes**. Crucially, the Fall Mouse **wins alone** if she has the most votes — even if
-she was the thief's follower — and **no one else wins with her**. Win priority at
-resolution: **Fall Mouse** (sole most-voted) > **Sleepyheads** (sole plurality on the
-thief) > **Thief + follower**. A Fall Mouse who is the follower but does *not* draw
-the most votes simply loses (she never wins alongside the thief).
+**Followers scale with player count (implemented):** witnessing the theft always
+leaks the thief's identity to that player, but *follower* membership is determined by
+count:
+- **≤5 players — witness mode:** one follower drawn from the witnesses. A lone witness
+  joins automatically; if several witnessed, the thief picks one before discussion.
+- **6 players:** after the night, the thief recruits **1** follower (any player); that
+  follower learns the thief.
+- **7 players:** the thief recruits **2** followers (any players); they know **each
+  other** but **not** the thief (unless one independently witnessed the theft).
+- **8 players:** the thief recruits **2** followers (any players); they know the thief
+  **and** each other.
+The thief makes these choices on their Night card; any slots left unpicked are
+auto-filled at random when the round advances to discussion.
 
-**Open variant to confirm later:** the printed rules add follower handling for 6+
-players ("after 6 o'clock"). The exact text isn't in public sources — **deferred**
-until the physical rulebook is on hand rather than guessed (see §8/§9).
+**Fall Mouse (optional role, implemented):** a Tanner/Fool-style role the host can
+toggle on before the round, **only in 6-8 player games**. She replaces one Sleepyhead
+card and plays exactly like a Sleepyhead (rolls a die, can witness, can peek, and *can*
+be chosen as the thief's follower) but **wins by receiving the most votes**. She **wins
+alone** — even if she was the thief's follower — and **no one else wins with her**. A
+Fall Mouse who is a follower but does *not* draw the most votes simply loses.
+
+**Vote resolution & ties (implemented):** win priority is **Fall Mouse > Sleepyheads >
+Thief + followers**, and ties resolve by membership of the top-voted set, not by sole
+plurality:
+- If the **Fall Mouse** is among the most-voted (even tied with the thief) → Fall Mouse
+  wins alone.
+- Else if the **Thief** is among the most-voted (even tied) → the thief is revealed and
+  the **Sleepyheads** win.
+- Else → the **Thief and followers** escape and win.
 
 ---
 
@@ -191,10 +207,12 @@ Host drives forward transitions; server enforces preconditions and timers.
 - **Admin/host leaves:** existing auto-promote applies; new host inherits game
   controls.
 - **Late joiners:** spectate until the round ends, then join next round.
-- **Tie vote:** default = Thief escapes (Sleepyheads lose); make configurable.
-- **No witnesses (Thief rolled a unique hour):** Thief simply has no follower — valid.
-- **Multiple witnesses:** Thief chooses one Follower (core rule); the 6+ player
-  variant is a later toggle (`config.followerVariant`).
+- **Tie vote:** resolved by top-voted membership (see "Vote resolution & ties" in §1)
+  — thief in the top set → Sleepyheads win; Fall Mouse in the top set → Fall Mouse wins.
+- **No witnesses / not enough recruits:** ≤5 with no witness → no follower (valid);
+  6-8 follower slots the thief leaves empty are auto-filled at random.
+- **Follower count by players:** 1 (≤6) or 2 (7-8); see §1 "Followers scale with
+  player count".
 - **Anti-cheat:** authoritative server; never trust client-sent roles/dice/results.
 
 ---
@@ -208,10 +226,11 @@ Host drives forward transitions; server enforces preconditions and timers.
 3. **M3 — Client flow:** role reveal → night → discussion → voting → results screens.
 4. **M4 — Polish:** timers, animations (hour counter, finger-points, card flip),
    follower-pick & peek modals, play-again reset.
-5. **M5 — Variants & robustness:** ✅ Fall Mouse role (host toggle), spectators for
-   mid-round joiners, graceful disconnect/kick handling (drop non-essential players,
-   abort only on losing the thief or dropping below 4), host-configurable discussion
-   timer (60/90/120/180s). ⏸ 6+ follower variant deferred (needs rulebook text).
+5. **M5 — Variants & robustness:** ✅ Fall Mouse role (host toggle), player-count
+   follower scaling (witness mode ≤5; thief recruitment of 1/2 followers for 6/7/8 with
+   per-count knowledge), tie-break rules, spectators for mid-round joiners, graceful
+   disconnect/kick handling (drop non-essential players, abort only on losing the thief
+   or dropping below 4), host-configurable discussion timer (60/90/120/180s).
 
 Each milestone: commit with a clean message and push to
 `https://github.com/Frigan/CheeseThief` (per project workflow).

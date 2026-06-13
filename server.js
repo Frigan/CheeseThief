@@ -283,6 +283,9 @@ io.on('connection', (socket) => {
   socket.on('begin_discussion', () => {
     const room = rooms[currentRoom];
     if (!room || !room.game || !isHost() || room.game.phase !== 'night') return;
+    // Fill any follower slots the thief didn't pick before moving on.
+    game.autofillFollowers(room.game);
+    sendSecrets(currentRoom);
     room.game.phase = 'discussion';
     const secs = room.game.config.discussionSeconds;
     room.game.timerEndsAt = Date.now() + secs * 1000;

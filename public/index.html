@@ -886,19 +886,42 @@ function renderNight() {
     <div class="info-line"><span class="emoji">${ch.e}</span><span>${ch.t}</span></div>
   `;
 
-  if (s.isWitness && s.knownThiefId) {
-    html += `<div class="info-line"><span class="emoji">🔦</span><span>You saw <b>${nameOf(s.knownThiefId)}</b> take the cheese!${s.isFollower ? ' You are their <b>follower</b> — keep their secret.' : ''}</span></div>`;
+  const isThief = s.role === 'thief';
+
+  // Knowledge of the thief's identity (from witnessing or a follower role that grants it).
+  if (!isThief && s.knownThiefId) {
+    html += `<div class="info-line"><span class="emoji">🔦</span><span>You know <b>${nameOf(s.knownThiefId)}</b> is the Cheese Thief.</span></div>`;
   }
-  if (s.role === 'thief') {
-    if (s.awakeWith.length === 0) {
-      html += `<div class="info-line"><span class="emoji">😎</span><span>Nobody saw you. The perfect crime — so far.</span></div>`;
-    } else if (s.needsFollowerChoice) {
-      html += `<div class="info-line"><span class="emoji">🤝</span><span>These players saw you. Choose one as your <b>follower</b>:</span></div>
+
+  // Follower status for non-thieves.
+  if (!isThief && s.isFollower) {
+    let t = s.knownThiefId
+      ? 'You are one of the thief\'s <b>followers</b> — keep the secret.'
+      : 'You are one of the thief\'s <b>followers</b>, but you do <b>not</b> know who the thief is.';
+    if (s.coFollowerIds && s.coFollowerIds.length) {
+      t += ` Your fellow follower${s.coFollowerIds.length > 1 ? 's' : ''}: <b>${s.coFollowerIds.map(nameOf).join(', ')}</b>.`;
+    }
+    html += `<div class="info-line"><span class="emoji">🤝</span><span>${t}</span></div>`;
+  }
+
+  // Thief's view: who saw them, plus follower recruitment.
+  if (isThief) {
+    html += s.awakeWith.length
+      ? `<div class="info-line"><span class="emoji">👀</span><span>Awake and saw you: <b>${s.awakeWith.map(nameOf).join(', ')}</b>.</span></div>`
+      : `<div class="info-line"><span class="emoji">😎</span><span>Nobody saw you take the cheese.</span></div>`;
+
+    if (s.needsFollowerChoice) {
+      const remaining = s.followerCount - s.followersChosen.length;
+      const label = s.chooseFromAll
+        ? `Choose ${remaining} more follower${remaining > 1 ? 's' : ''} — any player:`
+        : 'These players saw you — choose your <b>follower</b>:';
+      html += `<div class="info-line"><span class="emoji">🤝</span><span>${label}</span></div>
         <div class="choice-grid">
-          ${s.witnessCandidates.map(id => `<button class="choice-btn" data-action="choose_follower" data-target="${id}">${nameOf(id)}</button>`).join('')}
-        </div>`;
-    } else if (s.followerId) {
-      html += `<div class="info-line"><span class="emoji">🤝</span><span>Your follower is <b>${nameOf(s.followerId)}</b>.</span></div>`;
+          ${s.followerCandidates.map(id => `<button class="choice-btn" data-action="choose_follower" data-target="${id}">${nameOf(id)}</button>`).join('')}
+        </div>
+        ${s.followersChosen.length ? `<p class="sub">Chosen so far: ${s.followersChosen.map(nameOf).join(', ')}</p>` : ''}`;
+    } else if (s.followersChosen.length) {
+      html += `<div class="info-line"><span class="emoji">🤝</span><span>Your follower${s.followersChosen.length > 1 ? 's' : ''}: <b>${s.followersChosen.map(nameOf).join(', ')}</b>.</span></div>`;
     }
   }
 
@@ -925,7 +948,9 @@ function renderDiscussion() {
     <div class="timer-big" id="timerDisplay">--</div>
     ${s.hour ? `<div class="info-line"><span class="emoji">⏰</span><span>You woke at hour <b>${s.hour}</b>.</span></div>` : ''}
     ${ch ? `<div class="info-line"><span class="emoji">${ch.e}</span><span>${ch.t}</span></div>` : ''}
-    ${s.isWitness && s.knownThiefId ? `<div class="info-line"><span class="emoji">🔦</span><span>You know the thief is <b>${nameOf(s.knownThiefId)}</b>.</span></div>` : ''}
+    ${s.role !== 'thief' && s.knownThiefId ? `<div class="info-line"><span class="emoji">🔦</span><span>You know the thief is <b>${nameOf(s.knownThiefId)}</b>.</span></div>` : ''}
+    ${s.role === 'thief' && s.followersChosen && s.followersChosen.length ? `<div class="info-line"><span class="emoji">🤝</span><span>Your follower${s.followersChosen.length > 1 ? 's' : ''}: <b>${s.followersChosen.map(nameOf).join(', ')}</b>.</span></div>` : ''}
+    ${s.role !== 'thief' && s.isFollower ? `<div class="info-line"><span class="emoji">🤝</span><span>You are a <b>follower</b>${s.coFollowerIds && s.coFollowerIds.length ? ` with <b>${s.coFollowerIds.map(nameOf).join(', ')}</b>` : ''}. Win if the thief escapes.</span></div>` : ''}
     ${s.peekResult ? `<div class="info-line"><span class="emoji">🔎</span><span><b>${nameOf(s.peekResult.targetId)}</b> woke at hour <b>${s.peekResult.hour}</b>.</span></div>` : ''}
     ${s.role === 'fallMouse' ? `<div class="info-line"><span class="emoji">🐭</span><span><b>Your goal:</b> get the most votes — look guilty!</span></div>` : ''}
     <div class="overlay-actions">${isAdmin ? hostBtn('Start Voting →', 'begin_voting') : '<p class="waiting-note">Voting begins when the timer ends.</p>'}</div>
@@ -993,7 +1018,7 @@ function renderResults() {
     <div class="result-banner ${iWon ? 'result-win' : 'result-lose'}">${banner}</div>
     <p class="sub">${iWon ? 'You were on the winning side! 🎉' : 'Better luck next round.'}</p>
     <div class="reveal-row"><span>🧀 <b>${nameOf(r.thiefId)}</b></span><span class="reveal-tag">THIEF</span></div>
-    ${r.followerId ? `<div class="reveal-row"><span>🤝 <b>${nameOf(r.followerId)}</b></span><span class="reveal-tag">FOLLOWER</span></div>` : ''}
+    ${(r.followerIds || []).map(fid => `<div class="reveal-row"><span>🤝 <b>${nameOf(fid)}</b></span><span class="reveal-tag">FOLLOWER</span></div>`).join('')}
     ${r.fallMouseId ? `<div class="reveal-row"><span>🐭 <b>${nameOf(r.fallMouseId)}</b></span><span class="reveal-tag">FALL MOUSE</span></div>` : ''}
     <div class="info-line" style="margin-top:14px"><span class="emoji">🗳️</span><span>The group accused: <b>${(r.accused || []).map(nameOf).join(', ') || 'no one'}</b></span></div>
     <div class="overlay-actions">${isAdmin ? hostBtn('🔄 Play Again', 'play_again') : '<p class="waiting-note">Waiting for the host to start a new round…</p>'}</div>
