@@ -484,7 +484,7 @@
     </div>
 
     <div id="hostOptions" class="host-options" style="display:none">
-      <label class="opt"><input type="checkbox" id="optFallMouse"> 🐭 <b>Fall Mouse</b> <span class="opt-hint">— wins by getting the most votes</span></label>
+      <label class="opt" id="fallMouseOpt"><input type="checkbox" id="optFallMouse"> 🐭 <b>Fall Mouse</b> <span class="opt-hint">— wins by getting the most votes (6-8 players)</span></label>
       <label class="opt">⏱️ Discussion
         <select id="optTimer">
           <option value="60">60s</option>
@@ -613,6 +613,12 @@ function updateRoomControls() {
   startBtn.title = canStart ? '' : `Need ${minPlayers}-${maxPlayers} players`;
   document.getElementById('randomiseBtn').style.display = (isAdmin && inLobby) ? 'inline-flex' : 'none';
   document.getElementById('hostOptions').style.display = (isAdmin && inLobby) ? 'flex' : 'none';
+  const fmBox = document.getElementById('optFallMouse');
+  const fmAllowed = n >= 6;
+  fmBox.disabled = !fmAllowed;
+  if (!fmAllowed) fmBox.checked = false;
+  document.getElementById('fallMouseOpt').title = fmAllowed ? '' : 'Requires 6-8 players';
+  document.getElementById('fallMouseOpt').style.opacity = fmAllowed ? '1' : '.5';
 
   const status = document.getElementById('gameStatus');
   if (inLobby) {
@@ -973,7 +979,9 @@ function renderResults() {
   let iWon = false;
   if (r.winners === 'fallMouse') iWon = role === 'fallMouse';
   else if (r.winners === 'sleepyheads') iWon = role === 'sleepyhead';
-  else iWon = role === 'thief' || (mySecret && mySecret.isFollower);
+  // Thief win: the thief and a follower win together — but a Fall Mouse follower
+  // never wins with them (she only ever wins alone, by most votes).
+  else iWon = role === 'thief' || (mySecret && mySecret.isFollower && role !== 'fallMouse');
 
   const banner = {
     fallMouse: '🐭 The Fall Mouse fooled everyone!',

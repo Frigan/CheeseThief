@@ -44,11 +44,14 @@ players are awake together iff they rolled the **same hour**. We adopt this exac
   of hard information the game leaks.
 
 **Fall Mouse (optional role, implemented in M5):** a Tanner/Fool-style role the host
-can toggle on before the round. She replaces one Sleepyhead and plays exactly like
-one (rolls a die, can witness, can peek) but **wins by receiving the most votes**
-(sole plurality). Win priority at resolution: **Fall Mouse** (sole most-voted) >
-**Sleepyheads** (sole plurality on the thief) > **Thief**. The Fall Mouse can witness
-the theft but is never eligible to be the thief's follower.
+can toggle on before the round, **only in 6-8 player games**. She replaces one
+Sleepyhead card and plays exactly like a Sleepyhead (rolls a die, can witness, can
+peek, and *can* be chosen as the thief's follower) but **wins by receiving the most
+votes**. Crucially, the Fall Mouse **wins alone** if she has the most votes — even if
+she was the thief's follower — and **no one else wins with her**. Win priority at
+resolution: **Fall Mouse** (sole most-voted) > **Sleepyheads** (sole plurality on the
+thief) > **Thief + follower**. A Fall Mouse who is the follower but does *not* draw
+the most votes simply loses (she never wins alongside the thief).
 
 **Open variant to confirm later:** the printed rules add follower handling for 6+
 players ("after 6 o'clock"). The exact text isn't in public sources — **deferred**

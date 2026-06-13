@@ -20,9 +20,9 @@ function startGame(members, config = {}) {
   const thiefId = pick(ids);
 
   // Optional Fall Mouse — a Tanner-style role that replaces one Sleepyhead and
-  // wins by drawing the most votes. Needs at least one non-thief seat to occupy.
+  // wins (alone) by drawing the most votes. Only available in 6-8 player games.
   let fallMouseId = null;
-  if (cfg.fallMouse && ids.length >= 3) {
+  if (cfg.fallMouse && ids.length >= 6) {
     const others = ids.filter(id => id !== thiefId);
     fallMouseId = pick(others);
   }
@@ -67,8 +67,9 @@ function computeNight(state, ids) {
   state.witnesses = ids.filter(id =>
     id !== state.thiefId && state.dice[id] === thiefHour
   );
-  // The Fall Mouse has her own agenda, so she can never be the thief's follower.
-  state.followerCandidates = state.witnesses.filter(id => id !== state.fallMouseId);
+  // Any witness — including the Fall Mouse — can be picked as the thief's follower.
+  // (The Fall Mouse still only ever wins alone, by most votes; see resolveVote.)
+  state.followerCandidates = state.witnesses.slice();
 
   // A player alone at their hour may peek one other player's die.
   state.soloEligible = ids.filter(id =>
@@ -159,7 +160,8 @@ function removeParticipant(state, id) {
 }
 
 // Tally votes and resolve. Win priority: Fall Mouse (sole most-voted) > Sleepyheads
-// (sole plurality on the thief) > Thief.
+// (sole plurality on the thief) > Thief. The Fall Mouse wins ALONE — even if she was
+// the thief's chosen follower — and no one else wins with her.
 function resolveVote(state, ids) {
   const tally = {};
   ids.forEach(id => { tally[id] = 0; });
