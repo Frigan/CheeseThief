@@ -424,6 +424,25 @@
     margin: 8px 0;
   }
 
+  .night-clock {
+    font-size: 3.4rem;
+    font-weight: 800;
+    color: var(--gold);
+    letter-spacing: 3px;
+    font-variant-numeric: tabular-nums;
+    margin: 14px 0 6px;
+    text-shadow: 0 2px 14px rgba(245,197,24,.25);
+    transition: transform .25s;
+  }
+  .night-narration {
+    color: var(--muted);
+    font-size: 0.95rem;
+    min-height: 1.3em;
+    margin-bottom: 8px;
+    transition: color .2s;
+  }
+  .night-narration.mine { color: var(--gold); font-weight: 700; }
+
   .choice-grid {
     display: flex;
     flex-wrap: wrap;
@@ -922,6 +941,19 @@ let gameState = null;
 let timerInterval = null;
 let myVoteTarget = null;
 
+// Night reveal sequence (the clock ticking 01:00 → 06:00).
+let nightInit = false;
+let nightState = null;     // { clockHour, finished }
+let nightTimers = [];
+const NIGHT_HOUR_MS = 3500;
+
+function resetNight() {
+  nightTimers.forEach(t => clearTimeout(t));
+  nightTimers = [];
+  nightInit = false;
+  nightState = null;
+}
+
 const overlay = document.getElementById('gameOverlay');
 const overlayCard = document.getElementById('overlayCard');
 
@@ -942,6 +974,7 @@ socket.on('your_secret', (s) => { mySecret = s; renderGame(); });
 socket.on('game_update', (g) => {
   gameState = g;
   if (g.phase === 'lobby' || g.phase === 'roleReveal') myVoteTarget = null;
+  if (g.phase !== 'night') resetNight(); // tear down the clock when night ends
   if (g.phase === 'lobby') {
     mySecret = null;
     overlay.classList.remove('show');
@@ -953,6 +986,7 @@ socket.on('game_update', (g) => {
 socket.on('game_aborted', ({ reason }) => {
   mySecret = null;
   gameState = null;
+  resetNight();
   overlay.classList.remove('show');
   if (reason) alert(reason);
 });
@@ -1033,25 +1067,75 @@ function cheeseText(c) {
   return { e: '❌', t: 'The cheese was already gone when you woke.' };
 }
 
+// The night plays out as a clock ticking 01:00 → 06:00. A player's own information
+// is only revealed when their wake-up hour is called, with a pause between each hour.
 function renderNight() {
   if (!mySecret) { overlayCard.innerHTML = '<p>The house falls asleep…</p>'; return; }
+
+  // Already running — just refresh the parts that can change (peek/recruit/host button).
+  if (nightInit) {
+    if (nightState && nightState.clockHour >= mySecret.hour) revealNightPersonalInfo();
+    refreshNightActions();
+    return;
+  }
+
+  nightInit = true;
+  overlayCard.innerHTML = `
+    <h2>🌙 Night falls…</h2>
+    <div class="night-clock" id="nightClock">00:00</div>
+    <div class="night-narration" id="nightNarration">The whole house is fast asleep.</div>
+    <div id="nightInfo"></div>
+    <div id="nightActions"></div>
+  `;
+  startNightSequence();
+}
+
+function startNightSequence() {
+  nightState = { clockHour: 0, finished: false };
+  let h = 1;
+  const step = () => {
+    nightState.clockHour = h;
+    const clk = document.getElementById('nightClock');
+    const nar = document.getElementById('nightNarration');
+    if (clk) clk.textContent = String(h).padStart(2, '0') + ':00';
+    if (nar) {
+      nar.textContent = (mySecret && h === mySecret.hour)
+        ? '⏰ This is your hour — you wake!'
+        : `${h} o'clock… the house stirs.`;
+      nar.classList.toggle('mine', !!(mySecret && h === mySecret.hour));
+    }
+    if (mySecret && h === mySecret.hour) revealNightPersonalInfo();
+    refreshNightActions();
+
+    if (h < 6) {
+      nightTimers.push(setTimeout(() => { h += 1; step(); }, NIGHT_HOUR_MS));
+    } else {
+      nightTimers.push(setTimeout(() => {
+        nightState.finished = true;
+        const nar2 = document.getElementById('nightNarration');
+        if (nar2) { nar2.textContent = '☀️ Dawn breaks…'; nar2.classList.remove('mine'); }
+        refreshNightActions();
+      }, NIGHT_HOUR_MS));
+    }
+  };
+  step();
+}
+
+// Fill in the local player's private information block (called at their hour).
+function revealNightPersonalInfo() {
+  const box = document.getElementById('nightInfo');
+  if (!box) return;
   const s = mySecret;
+  const isThief = s.role === 'thief';
   const ch = cheeseText(s.cheesePresent);
   let html = `
-    <h2>🌙 Night</h2>
-    <p class="sub">You woke at hour</p>
-    <div class="hour-badge">${s.hour}</div>
+    <div class="info-line"><span class="emoji">⏰</span><span>You woke at <b>${String(s.hour).padStart(2, '0')}:00</b>.</span></div>
     <div class="info-line"><span class="emoji">${ch.e}</span><span>${ch.t}</span></div>
   `;
 
-  const isThief = s.role === 'thief';
-
-  // Knowledge of the thief's identity (from witnessing or a follower role that grants it).
   if (!isThief && s.knownThiefId) {
     html += `<div class="info-line"><span class="emoji">🔦</span><span>You know <b>${nameOf(s.knownThiefId)}</b> is the Cheese Thief.</span></div>`;
   }
-
-  // Follower status for non-thieves.
   if (!isThief && s.isFollower) {
     let t = s.knownThiefId
       ? 'You are one of the thief\'s <b>followers</b> — keep the secret.'
@@ -1061,40 +1145,67 @@ function renderNight() {
     }
     html += `<div class="info-line"><span class="emoji">🤝</span><span>${t}</span></div>`;
   }
-
-  // Thief's view: who saw them, plus follower recruitment.
   if (isThief) {
     html += s.awakeWith.length
       ? `<div class="info-line"><span class="emoji">👀</span><span>Awake and saw you: <b>${s.awakeWith.map(nameOf).join(', ')}</b>.</span></div>`
       : `<div class="info-line"><span class="emoji">😎</span><span>Nobody saw you take the cheese.</span></div>`;
+  }
+  box.innerHTML = html;
+}
 
-    if (s.needsFollowerChoice) {
+// Interactive bits + host control, gated on how far the clock has progressed.
+function refreshNightActions() {
+  const box = document.getElementById('nightActions');
+  if (!box || !nightState) return;
+  const s = mySecret;
+  const myHourReached = nightState.clockHour >= s.hour;
+  let html = '';
+
+  // Peek: available once the solo player's hour has been called.
+  if (s.canPeek && myHourReached) {
+    html += `<div class="info-line"><span class="emoji">🕵️</span><span>You were alone — peek at one player's wake-up hour:</span></div>
+      <div class="choice-grid">
+        ${roomMembers.filter(m => m.id !== myId).map(m => `<button class="choice-btn peek-btn" data-target="${m.id}">${esc(m.name)}</button>`).join('')}
+      </div>`;
+  } else if (s.peekResult) {
+    html += `<div class="info-line"><span class="emoji">🔎</span><span>You peeked: <b>${nameOf(s.peekResult.targetId)}</b> woke at hour <b>${s.peekResult.hour}</b>.</span></div>`;
+  }
+
+  // Thief recruitment. Witness-mode resolves at the thief's hour; choose-mode after dawn.
+  if (s.role === 'thief') {
+    const recruitReady = s.chooseFromAll ? nightState.finished : myHourReached;
+    if (s.needsFollowerChoice && recruitReady) {
       const remaining = s.followerCount - s.followersChosen.length;
       const label = s.chooseFromAll
         ? `Choose ${remaining} more follower${remaining > 1 ? 's' : ''} — any player:`
         : 'These players saw you — choose your <b>follower</b>:';
       html += `<div class="info-line"><span class="emoji">🤝</span><span>${label}</span></div>
         <div class="choice-grid">
-          ${s.followerCandidates.map(id => `<button class="choice-btn" data-action="choose_follower" data-target="${id}">${nameOf(id)}</button>`).join('')}
+          ${s.followerCandidates.map(id => `<button class="choice-btn follow-btn" data-target="${id}">${nameOf(id)}</button>`).join('')}
         </div>
         ${s.followersChosen.length ? `<p class="sub">Chosen so far: ${s.followersChosen.map(nameOf).join(', ')}</p>` : ''}`;
-    } else if (s.followersChosen.length) {
+    } else if (s.followersChosen.length && myHourReached) {
       html += `<div class="info-line"><span class="emoji">🤝</span><span>Your follower${s.followersChosen.length > 1 ? 's' : ''}: <b>${s.followersChosen.map(nameOf).join(', ')}</b>.</span></div>`;
     }
   }
 
-  // Peek action for solo sleepyheads
-  if (s.canPeek) {
-    html += `<div class="info-line"><span class="emoji">🕵️</span><span>You were alone — peek at one player's wake-up hour:</span></div>
-      <div class="choice-grid">
-        ${roomMembers.filter(m => m.id !== myId).map(m => `<button class="choice-btn" data-action="peek_player" data-target="${m.id}">${esc(m.name)}</button>`).join('')}
-      </div>`;
-  } else if (s.peekResult) {
-    html += `<div class="info-line"><span class="emoji">🔎</span><span>You peeked: <b>${nameOf(s.peekResult.targetId)}</b> woke at hour <b>${s.peekResult.hour}</b>.</span></div>`;
+  // Host advances only once dawn has broken.
+  if (nightState.finished) {
+    html += `<div class="overlay-actions">${isAdmin
+      ? '<button class="btn btn-primary" id="proceedDiscBtn">Proceed to Discussion →</button>'
+      : '<p class="waiting-note">Waiting for the host to wake everyone…</p>'}</div>`;
+  } else {
+    html += `<p class="waiting-note">The night unfolds…</p>`;
   }
 
-  html += `<div class="overlay-actions">${isAdmin ? hostBtn('Proceed to Discussion →', 'begin_discussion') : '<p class="waiting-note">Waiting for the host to wake everyone…</p>'}</div>`;
-  overlayCard.innerHTML = html;
+  box.innerHTML = html;
+
+  box.querySelectorAll('.peek-btn').forEach(b =>
+    b.addEventListener('click', () => socket.emit('peek_player', { targetId: b.dataset.target })));
+  box.querySelectorAll('.follow-btn').forEach(b =>
+    b.addEventListener('click', () => socket.emit('choose_follower', { targetId: b.dataset.target })));
+  const proceed = document.getElementById('proceedDiscBtn');
+  if (proceed) proceed.addEventListener('click', () => socket.emit('begin_discussion'));
 }
 
 function renderDiscussion() {

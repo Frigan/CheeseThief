@@ -171,11 +171,13 @@ Add screens layered over the existing table; reuse styling tokens/CSS vars.
    each winner per round), highlights the leader (👑), and offers the host a **Reset**.
 2. **Role reveal:** full-screen card flip — "🧀 You are the **Cheese Thief**" or
    "😴 You are a **Sleepyhead**". Tap to dismiss → `ack_role`.
-3. **Night phase:** animated hour counter 1→6 around the table; each player privately
-   sees: their hour, "the cheese was / wasn't there", and any witness/peek result.
-   - Thief sees the cheese move to them; if multiple witnesses, modal to pick a
-     Follower.
-   - Solo sleepyhead gets a one-time **Peek** action (click a seat).
+3. **Night phase:** a clock window ticks **01:00 → 06:00** with a ~3.5s pause between
+   each hour. A player's private information is revealed **only when their own hour is
+   called** ("the cheese was / wasn't there", witness knowledge, follower status).
+   - Solo sleepyhead's one-time **Peek** unlocks at their hour.
+   - Thief recruitment resolves at the thief's hour (witness mode, ≤5 players) or at
+     **dawn** after 06:00 (choose mode, 6-8 players).
+   - The host's **Proceed to Discussion** appears only once dawn breaks.
 4. **Discussion:** countdown timer (host-configurable, default 90s) + reminder of
    own private info; table highlights whose turn (optional speaking order).
 5. **Voting:** click a silhouette to point at them; live "X / N voted" indicator;
