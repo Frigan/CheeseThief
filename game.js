@@ -144,7 +144,12 @@ function secretFor(state, id) {
     cheesePresent: state.cheesePresent[id],
     isWitness,
     knownThiefId,
-    awakeWith: isThief ? state.witnesses.slice() : [],
+    awakeWith: (() => {
+      const myHour = state.dice[id];
+      return Object.keys(state.dice).filter(other =>
+        other !== id && state.dice[other] === myHour
+      );
+    })(),
     canPeek: state.soloEligible.includes(id) && !isThief && !state.peeks[id],
     peekResult: state.peeks[id]
       ? { targetId: state.peeks[id], hour: state.dice[state.peeks[id]] }

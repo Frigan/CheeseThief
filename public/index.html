@@ -1149,6 +1149,11 @@ function revealNightPersonalInfo() {
     html += s.awakeWith.length
       ? `<div class="info-line"><span class="emoji">👀</span><span>Awake and saw you: <b>${s.awakeWith.map(nameOf).join(', ')}</b>.</span></div>`
       : `<div class="info-line"><span class="emoji">😎</span><span>Nobody saw you take the cheese.</span></div>`;
+  } else if (s.awakeWith && s.awakeWith.length) {
+    const others = s.awakeWith.filter(id => id !== mySecret.knownThiefId);
+    if (others.length) {
+      html += `<div class="info-line"><span class="emoji">👋</span><span>Also awake at your hour: <b>${others.map(nameOf).join(', ')}</b>.</span></div>`;
+    }
   }
   box.innerHTML = html;
 }
